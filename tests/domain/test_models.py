@@ -1,4 +1,7 @@
+from dataclasses import FrozenInstanceError
 from datetime import datetime
+
+import pytest
 
 from oraculo_enom.domain.models import Comparator, RollRequest, RollResult
 
@@ -18,3 +21,5 @@ def test_roll_result_is_immutable() -> None:
         created_at=datetime(2026, 9, 5, 12, 0),
     )
     assert result.values == (2, 5)
+    with pytest.raises(FrozenInstanceError):
+        result.total = 8
