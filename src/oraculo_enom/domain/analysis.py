@@ -40,4 +40,3 @@ def analyze(
         matches=matches,
         created_at=created_at if created_at is not None else datetime.now(),
     )
-

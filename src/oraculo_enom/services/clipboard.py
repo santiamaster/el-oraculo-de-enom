@@ -14,4 +14,3 @@ def format_roll(result: RollResult) -> str:
             f"{len(result.matches)} de {len(result.values)}"
         )
     return "\n".join(lines)
-

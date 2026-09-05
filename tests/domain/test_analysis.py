@@ -38,4 +38,3 @@ def test_analyze_without_filter_has_no_matches() -> None:
     result = analyze(RollRequest(2, 6, False), (2, 5))
 
     assert result.matches == ()
-
