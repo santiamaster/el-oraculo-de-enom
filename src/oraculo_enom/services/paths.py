@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 
 
-_HISTORY_DIRECTORY_ERROR = (
+HISTORY_STORAGE_ERROR = (
     "No se puede guardar el historial en esta ubicación. Mové la aplicación a una "
     "carpeta con permisos de escritura."
 )
@@ -23,5 +23,5 @@ def database_path() -> Path:
     try:
         data_directory.mkdir(parents=True, exist_ok=True)
     except OSError as error:
-        raise OSError(_HISTORY_DIRECTORY_ERROR) from error
+        raise OSError(HISTORY_STORAGE_ERROR) from error
     return data_directory / "historial.db"

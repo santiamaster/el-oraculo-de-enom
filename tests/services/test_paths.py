@@ -6,6 +6,12 @@ import pytest
 from oraculo_enom.services import paths
 
 
+HISTORY_STORAGE_ERROR = (
+    "No se puede guardar el historial en esta ubicación. Mové la aplicación a una "
+    "carpeta con permisos de escritura."
+)
+
+
 def test_application_dir_uses_executable_parent_for_frozen_application(
     monkeypatch,
 ) -> None:
@@ -47,8 +53,8 @@ def test_database_path_explains_when_data_directory_cannot_be_created(
 
     monkeypatch.setattr(Path, "mkdir", fail_to_create_directory)
 
-    with pytest.raises(
-        OSError,
-        match="No se puede guardar el historial en esta ubicación",
-    ):
+    with pytest.raises(OSError) as error:
         paths.database_path()
+
+    assert str(error.value) == HISTORY_STORAGE_ERROR
+    assert isinstance(error.value.__cause__, PermissionError)

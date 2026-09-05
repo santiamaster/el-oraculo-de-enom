@@ -1,8 +1,17 @@
 from datetime import date, datetime
 from pathlib import Path
+import sqlite3
+
+import pytest
 
 from oraculo_enom.domain.models import Comparator, RollRequest, RollResult
 from oraculo_enom.persistence.history import HistoryRepository
+
+
+HISTORY_STORAGE_ERROR = (
+    "No se puede guardar el historial en esta ubicación. Mové la aplicación a una "
+    "carpeta con permisos de escritura."
+)
 
 
 def make_result(
@@ -57,6 +66,38 @@ def test_add_survives_reopen_with_filtered_roll_details(tmp_path: Path) -> None:
     assert stored.result.request.threshold == 16
     assert stored.result.created_at == datetime(2026, 9, 5, 12, 0)
     reopened.close()
+
+
+def test_repository_translates_database_open_failure(tmp_path: Path) -> None:
+    """Catches an unwritable history location leaking a SQLite error to the UI."""
+    database_directory = tmp_path / "historial.db"
+    database_directory.mkdir()
+
+    with pytest.raises(OSError) as error:
+        HistoryRepository(database_directory)
+
+    assert str(error.value) == HISTORY_STORAGE_ERROR
+    assert isinstance(error.value.__cause__, sqlite3.Error)
+
+
+def test_add_translates_sqlite_write_failure(tmp_path: Path, monkeypatch) -> None:
+    """Catches a failed history write leaking SQLite details to the UI."""
+    repository = HistoryRepository(tmp_path / "historial.db")
+
+    class FailingWriteConnection:
+        def execute(self, statement: str, parameters: tuple[object, ...]):
+            raise sqlite3.OperationalError("disk I/O error")
+
+        def commit(self) -> None:
+            raise AssertionError("a failed write must not be committed")
+
+    monkeypatch.setattr(repository, "_connection", FailingWriteConnection())
+
+    with pytest.raises(OSError) as error:
+        repository.add(make_result())
+
+    assert str(error.value) == HISTORY_STORAGE_ERROR
+    assert isinstance(error.value.__cause__, sqlite3.OperationalError)
 
 
 def test_recent_returns_newest_records_first(tmp_path: Path) -> None:

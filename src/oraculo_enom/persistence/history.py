@@ -7,7 +7,7 @@ import sqlite3
 
 from oraculo_enom.domain.analysis import OPERATIONS
 from oraculo_enom.domain.models import Comparator, RollRecord, RollRequest, RollResult
-from oraculo_enom.services.paths import database_path
+from oraculo_enom.services.paths import HISTORY_STORAGE_ERROR, database_path
 
 from .database import connect
 
@@ -25,7 +25,7 @@ class HistoryRepository:
     def add(self, result: RollResult) -> RollRecord:
         """Persist a roll result and return it with its database identifier."""
         request = result.request
-        cursor = self._connection.execute(
+        cursor = self._write(
             """
             INSERT INTO rolls (
                 created_at, count, sides, values_json, total, show_sum,
@@ -44,7 +44,6 @@ class HistoryRepository:
                 len(result.matches),
             ),
         )
-        self._connection.commit()
         return RollRecord(id=cursor.lastrowid, result=result)
 
     def recent(self, limit: int = 5) -> list[RollRecord]:
@@ -82,13 +81,21 @@ class HistoryRepository:
 
     def delete(self, record_id: int) -> None:
         """Delete one saved roll by its identifier."""
-        self._connection.execute("DELETE FROM rolls WHERE id = ?", (record_id,))
-        self._connection.commit()
+        self._write("DELETE FROM rolls WHERE id = ?", (record_id,))
 
     def clear(self) -> None:
         """Delete all saved rolls."""
-        self._connection.execute("DELETE FROM rolls")
-        self._connection.commit()
+        self._write("DELETE FROM rolls")
+
+    def _write(
+        self, statement: str, parameters: tuple[object, ...] = ()
+    ) -> sqlite3.Cursor:
+        try:
+            cursor = self._connection.execute(statement, parameters)
+            self._connection.commit()
+        except sqlite3.Error as error:
+            raise OSError(HISTORY_STORAGE_ERROR) from error
+        return cursor
 
     @staticmethod
     def _record_from_row(row: sqlite3.Row) -> RollRecord:
