@@ -28,6 +28,7 @@ from oraculo_enom.domain.dice import roll_values, validate_request
 from oraculo_enom.domain.models import Comparator, RollRequest, RollResult
 from oraculo_enom.persistence.history import HistoryRepository
 from oraculo_enom.services.clipboard import format_roll
+from oraculo_enom.ui.history_dialog import HistoryDialog
 
 
 Roller = Callable[[RollRequest], tuple[int, ...]]
@@ -48,6 +49,7 @@ class MainWindow(QMainWindow):
         self._selected_sides = 20
         self._last_request: RollRequest | None = None
         self._last_result: RollResult | None = None
+        self._history_dialog: HistoryDialog | None = None
 
         self.setWindowTitle("El Oráculo de ENOM")
         self.setMinimumSize(960, 640)
@@ -241,6 +243,7 @@ class MainWindow(QMainWindow):
 
         self.full_history_button = QPushButton("Ver historial completo")
         self.full_history_button.setObjectName("fullHistoryButton")
+        self.full_history_button.clicked.connect(self._open_full_history)
         layout.addWidget(self.full_history_button)
         return panel
 
@@ -358,6 +361,23 @@ class MainWindow(QMainWindow):
         if self._last_request is None:
             return
         self._apply_request(self._last_request)
+        self._roll()
+
+    def _open_full_history(self) -> None:
+        if self._history_dialog is None:
+            self._history_dialog = HistoryDialog(self._repository, self)
+            self._history_dialog.repeat_requested.connect(self._repeat_from_history)
+            self._history_dialog.finished.connect(self._refresh_recent_history)
+        else:
+            self._history_dialog.refresh()
+        self._history_dialog.show()
+        self._history_dialog.raise_()
+        self._history_dialog.activateWindow()
+
+    def _repeat_from_history(self, request: RollRequest) -> None:
+        if self._history_dialog is not None:
+            self._history_dialog.close()
+        self._apply_request(request)
         self._roll()
 
     def _copy_last_roll(self) -> None:

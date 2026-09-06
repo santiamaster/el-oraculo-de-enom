@@ -11,7 +11,7 @@ MUTED = "#a99b83"
 
 
 STYLESHEET = f"""
-QMainWindow, QWidget {{
+QMainWindow, QDialog, QWidget {{
     background-color: {BACKGROUND};
     color: {TEXT};
     font-family: "Segoe UI", sans-serif;
@@ -54,7 +54,7 @@ QLabel#resultBadge[matched="true"] {{
     border: 2px solid {GOLD};
     color: {TEXT};
 }}
-QPushButton, QSpinBox, QComboBox {{
+QPushButton, QSpinBox, QComboBox, QDateEdit {{
     background-color: {FIELD};
     border: 1px solid {BORDER};
     border-radius: 5px;
@@ -80,11 +80,12 @@ QSpinBox#customSidesSpin[selected="true"] {{
 QPushButton#primaryButton {{
     min-height: 40px;
 }}
-QPushButton:focus, QSpinBox:focus, QComboBox:focus, QCheckBox:focus {{
+QPushButton:focus, QSpinBox:focus, QComboBox:focus, QDateEdit:focus,
+QCheckBox:focus {{
     border: 2px solid {GOLD};
     outline: none;
 }}
-QPushButton:disabled, QSpinBox:disabled, QComboBox:disabled,
+QPushButton:disabled, QSpinBox:disabled, QComboBox:disabled, QDateEdit:disabled,
 QCheckBox:disabled {{
     background-color: {PANEL};
     border-color: {BORDER};
@@ -111,6 +112,26 @@ QScrollArea {{
 }}
 QScrollArea > QWidget > QWidget {{
     background-color: {FIELD};
+}}
+QTableWidget, QPlainTextEdit {{
+    background-color: {FIELD};
+    border: 1px solid {BORDER};
+    border-radius: 6px;
+    color: {TEXT};
+    gridline-color: {BORDER};
+    selection-background-color: {GOLD_DARK};
+    selection-color: {TEXT};
+}}
+QHeaderView::section {{
+    background-color: {PANEL};
+    border: 0;
+    border-bottom: 1px solid {BORDER};
+    color: {GOLD};
+    font-weight: 700;
+    padding: 7px;
+}}
+QPushButton#destructiveButton {{
+    border-color: #b65d4d;
 }}
 QSplitter::handle {{
     background-color: {BORDER};
