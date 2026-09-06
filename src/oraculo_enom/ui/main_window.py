@@ -103,6 +103,7 @@ class MainWindow(QMainWindow):
         self.custom_sides_spin.setObjectName("customSidesSpin")
         self.custom_sides_spin.setRange(-9_999, 9_999)
         self.custom_sides_spin.setValue(20)
+        self.custom_sides_spin.setProperty("selected", False)
         self.custom_sides_spin.valueChanged.connect(self._select_custom_sides)
         custom_die_row.addWidget(self.custom_sides_spin)
         custom_die_row.addStretch()
@@ -246,6 +247,7 @@ class MainWindow(QMainWindow):
     def _select_quick_die(self, sides: int) -> None:
         self._selected_sides = sides
         self.die_buttons[sides].setChecked(True)
+        self._set_custom_die_selected(False)
         self._update_roll_button()
 
     def _select_custom_sides(self, sides: int) -> None:
@@ -254,7 +256,15 @@ class MainWindow(QMainWindow):
             button.setChecked(False)
         self._die_group.setExclusive(True)
         self._selected_sides = sides
+        self._set_custom_die_selected(True)
         self._update_roll_button()
+
+    def _set_custom_die_selected(self, selected: bool) -> None:
+        self.custom_sides_spin.setProperty("selected", selected)
+        style = self.custom_sides_spin.style()
+        style.unpolish(self.custom_sides_spin)
+        style.polish(self.custom_sides_spin)
+        self.custom_sides_spin.update()
 
     def _select_custom_quantity(self) -> None:
         with QSignalBlocker(self.quantity_combo):
@@ -294,6 +304,7 @@ class MainWindow(QMainWindow):
         if request.sides in self.die_buttons:
             self._selected_sides = request.sides
             self.die_buttons[request.sides].setChecked(True)
+            self._set_custom_die_selected(False)
         else:
             with QSignalBlocker(self.custom_sides_spin):
                 self.custom_sides_spin.setValue(request.sides)
@@ -302,6 +313,7 @@ class MainWindow(QMainWindow):
                 button.setChecked(False)
             self._die_group.setExclusive(True)
             self._selected_sides = request.sides
+            self._set_custom_die_selected(True)
 
         with QSignalBlocker(self.quantity_combo), QSignalBlocker(
             self.custom_quantity_spin

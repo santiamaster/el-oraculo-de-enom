@@ -159,3 +159,24 @@ def test_storage_error_is_shown_without_rendering_an_unsaved_roll(
     assert window.results_widget.findChildren(QLabel, "resultBadge") == []
     assert not window.repeat_button.isEnabled()
     assert not window.copy_button.isEnabled()
+
+
+def test_custom_die_keeps_selected_state_after_focus_leaves(
+    qtbot, repository: HistoryRepository
+) -> None:
+    window = MainWindow(repository)
+    qtbot.addWidget(window)
+    window.show()
+
+    window.custom_sides_spin.setValue(350)
+    window.custom_sides_spin.setFocus()
+    window.roll_button.setFocus()
+    QApplication.processEvents()
+
+    assert not window.custom_sides_spin.hasFocus()
+    assert window.custom_sides_spin.property("selected") is True
+    assert not any(button.isChecked() for button in window.die_buttons.values())
+
+    window.die_buttons[20].click()
+
+    assert window.custom_sides_spin.property("selected") is False

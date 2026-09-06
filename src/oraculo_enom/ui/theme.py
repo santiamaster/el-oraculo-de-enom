@@ -71,6 +71,12 @@ QPushButton:checked, QPushButton#primaryButton {{
     color: {TEXT};
     font-weight: 700;
 }}
+QSpinBox#customSidesSpin[selected="true"] {{
+    background-color: {GOLD_DARK};
+    border: 2px solid {GOLD};
+    color: {TEXT};
+    font-weight: 700;
+}}
 QPushButton#primaryButton {{
     min-height: 40px;
 }}

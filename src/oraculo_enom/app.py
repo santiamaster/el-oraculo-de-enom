@@ -2,7 +2,7 @@
 
 import sys
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from oraculo_enom.persistence.history import HistoryRepository
 from oraculo_enom.ui.main_window import MainWindow
@@ -17,7 +17,12 @@ def main() -> int:
     app.setOrganizationName("ENOM")
     app.setStyleSheet(STYLESHEET)
 
-    repository = HistoryRepository()
+    try:
+        repository = HistoryRepository()
+    except OSError as error:
+        QMessageBox.critical(None, "Error de almacenamiento", str(error))
+        return 1
+
     window = MainWindow(repository)
     window.show()
     try:
