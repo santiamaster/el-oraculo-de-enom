@@ -266,7 +266,13 @@ class HistoryDialog(QDialog):
         record_id = self.selected_record_id
         if record_id is None:
             return
-        self._repository.delete(record_id)
+        try:
+            self._repository.delete(record_id)
+        except OSError as error:
+            QMessageBox.critical(
+                self, "No se pudo actualizar el historial", str(error)
+            )
+            return
         self.refresh()
         self.history_changed.emit()
 
@@ -280,6 +286,12 @@ class HistoryDialog(QDialog):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self._repository.clear()
+        try:
+            self._repository.clear()
+        except OSError as error:
+            QMessageBox.critical(
+                self, "No se pudo actualizar el historial", str(error)
+            )
+            return
         self.refresh()
         self.history_changed.emit()

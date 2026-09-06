@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 
 from oraculo_enom.domain.models import Comparator, RollRecord, RollRequest, RollResult
 from oraculo_enom.persistence.history import HistoryRepository
+from oraculo_enom.services.paths import HISTORY_STORAGE_ERROR
 from oraculo_enom.ui.history_dialog import HistoryDialog
 from oraculo_enom.ui.main_window import MainWindow
 
@@ -203,6 +204,50 @@ def test_delete_removes_only_the_selected_record_and_refreshes_rows(
     ]
 
 
+def test_delete_failure_reports_error_without_changing_rows_or_selection(
+    qtbot,
+    repository: HistoryRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches a delete error escaping after the dialog discards its selection."""
+    _, middle, _ = seed_three(repository)
+    dialog = HistoryDialog(repository)
+    qtbot.addWidget(dialog)
+    dialog.records_table.selectRow(1)
+    original_ids = [
+        dialog.records_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        for row in range(dialog.records_table.rowCount())
+    ]
+    original_detail = dialog.detail_view.toPlainText()
+    messages: list[tuple[str, str]] = []
+    changes: list[str] = []
+    dialog.history_changed.connect(lambda: changes.append("changed"))
+
+    def fail_to_delete(record_id: int) -> None:
+        raise OSError(HISTORY_STORAGE_ERROR)
+
+    monkeypatch.setattr(repository, "delete", fail_to_delete)
+    monkeypatch.setattr(
+        QMessageBox,
+        "critical",
+        lambda parent, title, message: messages.append((title, message)),
+    )
+
+    qtbot.mouseClick(dialog.delete_button, Qt.MouseButton.LeftButton)
+
+    assert messages == [
+        ("No se pudo actualizar el historial", HISTORY_STORAGE_ERROR)
+    ]
+    assert [record.id for record in repository.recent()] == original_ids
+    assert [
+        dialog.records_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        for row in range(dialog.records_table.rowCount())
+    ] == original_ids
+    assert dialog.selected_record_id == middle.id
+    assert dialog.detail_view.toPlainText() == original_detail
+    assert changes == []
+
+
 def test_clear_all_requires_acceptance_before_removing_records(
     qtbot, repository: HistoryRepository, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -224,6 +269,55 @@ def test_clear_all_requires_acceptance_before_removing_records(
 
     assert repository.recent() == []
     assert dialog.records_table.rowCount() == 0
+
+
+def test_clear_failure_reports_error_without_changing_rows_or_selection(
+    qtbot,
+    repository: HistoryRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches a clear error escaping after the dialog discards its selection."""
+    oldest, _, _ = seed_three(repository)
+    dialog = HistoryDialog(repository)
+    qtbot.addWidget(dialog)
+    dialog.records_table.selectRow(2)
+    original_ids = [
+        dialog.records_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        for row in range(dialog.records_table.rowCount())
+    ]
+    original_detail = dialog.detail_view.toPlainText()
+    messages: list[tuple[str, str]] = []
+    changes: list[str] = []
+    dialog.history_changed.connect(lambda: changes.append("changed"))
+
+    def fail_to_clear() -> None:
+        raise OSError(HISTORY_STORAGE_ERROR)
+
+    monkeypatch.setattr(repository, "clear", fail_to_clear)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args: QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "critical",
+        lambda parent, title, message: messages.append((title, message)),
+    )
+
+    qtbot.mouseClick(dialog.clear_all_button, Qt.MouseButton.LeftButton)
+
+    assert messages == [
+        ("No se pudo actualizar el historial", HISTORY_STORAGE_ERROR)
+    ]
+    assert [record.id for record in repository.recent()] == original_ids
+    assert [
+        dialog.records_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        for row in range(dialog.records_table.rowCount())
+    ] == original_ids
+    assert dialog.selected_record_id == oldest.id
+    assert dialog.detail_view.toPlainText() == original_detail
+    assert changes == []
 
 
 def test_clear_all_remains_available_when_filters_hide_every_record(

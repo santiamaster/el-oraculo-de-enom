@@ -94,6 +94,10 @@ class HistoryRepository:
             cursor = self._connection.execute(statement, parameters)
             self._connection.commit()
         except sqlite3.Error as error:
+            try:
+                self._connection.rollback()
+            except sqlite3.Error:
+                pass
             raise OSError(HISTORY_STORAGE_ERROR) from error
         return cursor
 

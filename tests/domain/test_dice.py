@@ -28,6 +28,30 @@ def test_roll_maps_zero_based_random_values_to_dice_values() -> None:
     assert roll_values(RollRequest(3, 20, False), lambda _: next(generated)) == (1, 20, 10)
 
 
+def test_roll_executes_the_minimum_1d2_boundary() -> None:
+    """Catches generation skipping the inclusive upper face at the minimum size."""
+    values = roll_values(RollRequest(1, 2, False), lambda sides: sides - 1)
+
+    assert values == (2,)
+
+
+def test_roll_executes_1000d1000_with_every_value_in_bounds() -> None:
+    """Catches maximum-size generation truncating values or exceeding d1000."""
+    generated = iter(range(1_000))
+
+    def deterministic_randbelow(sides: int) -> int:
+        assert sides == 1_000
+        return next(generated)
+
+    values = roll_values(
+        RollRequest(1_000, 1_000, True), deterministic_randbelow
+    )
+
+    assert len(values) == 1_000
+    assert all(1 <= value <= 1_000 for value in values)
+    assert values == tuple(range(1, 1_001))
+
+
 @pytest.mark.parametrize(
     "req",
     [

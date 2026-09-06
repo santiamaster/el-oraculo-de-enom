@@ -91,6 +91,9 @@ def test_add_translates_sqlite_write_failure(tmp_path: Path, monkeypatch) -> Non
         def commit(self) -> None:
             raise AssertionError("a failed write must not be committed")
 
+        def rollback(self) -> None:
+            pass
+
     monkeypatch.setattr(repository, "_connection", FailingWriteConnection())
 
     with pytest.raises(OSError) as error:
@@ -98,6 +101,38 @@ def test_add_translates_sqlite_write_failure(tmp_path: Path, monkeypatch) -> Non
 
     assert str(error.value) == HISTORY_STORAGE_ERROR
     assert isinstance(error.value.__cause__, sqlite3.OperationalError)
+
+
+def test_add_rolls_back_an_insert_when_commit_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches a failed commit leaving an allegedly unsaved roll pending."""
+    repository = HistoryRepository(tmp_path / "historial.db")
+    connection = repository._connection
+    commit_error = sqlite3.OperationalError("disk I/O error")
+
+    class FailingCommitConnection:
+        def execute(self, statement: str, parameters: tuple[object, ...] = ()):
+            return connection.execute(statement, parameters)
+
+        def commit(self) -> None:
+            raise commit_error
+
+        def rollback(self) -> None:
+            connection.rollback()
+
+    monkeypatch.setattr(repository, "_connection", FailingCommitConnection())
+
+    with pytest.raises(OSError) as error:
+        repository.add(make_result())
+
+    assert str(error.value) == HISTORY_STORAGE_ERROR
+    assert error.value.__cause__ is commit_error
+    assert not connection.in_transaction
+    assert connection.execute("SELECT COUNT(*) FROM rolls").fetchone()[0] == 0
+    connection.commit()
+    assert connection.execute("SELECT COUNT(*) FROM rolls").fetchone()[0] == 0
+    connection.close()
 
 
 def test_recent_returns_newest_records_first(tmp_path: Path) -> None:
