@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 
 from oraculo_enom.domain.models import Comparator, RollRecord, RollRequest, RollResult
 from oraculo_enom.persistence.history import HistoryRepository
@@ -286,3 +286,52 @@ def test_main_window_history_repeat_closes_dialog_and_rolls_fresh_values(
     assert window.die_buttons[6].isChecked()
     assert window.quantity_combo.currentData() == 2
     assert not window.show_sum_check.isChecked()
+
+
+def test_main_window_recent_history_refreshes_immediately_after_dialog_delete(
+    qtbot, repository: HistoryRepository
+) -> None:
+    """Catches the main recent-history panel staying stale after one deletion."""
+    seed_three(repository)
+    window = MainWindow(repository)
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.mouseClick(window.full_history_button, Qt.MouseButton.LeftButton)
+    dialog = window.findChild(HistoryDialog)
+    assert dialog is not None
+
+    dialog.records_table.selectRow(0)
+    qtbot.mouseClick(dialog.delete_button, Qt.MouseButton.LeftButton)
+
+    entries = window.recent_history_widget.findChildren(QLabel, "historyEntry")
+    assert dialog.isVisible()
+    assert len(entries) == 2
+    assert all("1D20 · Suma 7" not in entry.text() for entry in entries)
+
+
+def test_main_window_recent_history_refreshes_immediately_after_dialog_clear(
+    qtbot,
+    repository: HistoryRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches the main recent-history panel staying stale after clear-all."""
+    seed_three(repository)
+    window = MainWindow(repository)
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.mouseClick(window.full_history_button, Qt.MouseButton.LeftButton)
+    dialog = window.findChild(HistoryDialog)
+    assert dialog is not None
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args: QMessageBox.StandardButton.Yes,
+    )
+
+    qtbot.mouseClick(dialog.clear_all_button, Qt.MouseButton.LeftButton)
+
+    entries = window.recent_history_widget.findChildren(QLabel, "historyEntry")
+    empty = window.recent_history_widget.findChildren(QLabel, "emptyHistoryLabel")
+    assert dialog.isVisible()
+    assert entries == []
+    assert len(empty) == 1

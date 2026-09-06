@@ -30,6 +30,7 @@ class HistoryDialog(QDialog):
     """Browse, filter, copy, repeat, and delete saved rolls."""
 
     repeat_requested = Signal(RollRequest)
+    history_changed = Signal()
 
     def __init__(self, repository: HistoryRepository, parent=None) -> None:
         super().__init__(parent)
@@ -267,6 +268,7 @@ class HistoryDialog(QDialog):
             return
         self._repository.delete(record_id)
         self.refresh()
+        self.history_changed.emit()
 
     def _clear_all(self) -> None:
         answer = QMessageBox.question(
@@ -280,3 +282,4 @@ class HistoryDialog(QDialog):
             return
         self._repository.clear()
         self.refresh()
+        self.history_changed.emit()

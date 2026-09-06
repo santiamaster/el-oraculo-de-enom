@@ -367,6 +367,9 @@ class MainWindow(QMainWindow):
         if self._history_dialog is None:
             self._history_dialog = HistoryDialog(self._repository, self)
             self._history_dialog.repeat_requested.connect(self._repeat_from_history)
+            self._history_dialog.history_changed.connect(
+                self._refresh_recent_history
+            )
             self._history_dialog.finished.connect(self._refresh_recent_history)
         else:
             self._history_dialog.refresh()
