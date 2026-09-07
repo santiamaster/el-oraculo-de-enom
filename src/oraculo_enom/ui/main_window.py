@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QPushButton,
     QScrollArea,
@@ -25,13 +26,18 @@ from PySide6.QtWidgets import (
 
 from oraculo_enom.domain.analysis import analyze
 from oraculo_enom.domain.dice import roll_values, validate_request
-from oraculo_enom.domain.models import Comparator, RollRequest, RollResult
+from oraculo_enom.domain.models import (
+    Comparator,
+    RollComponentRequest,
+    RollRequest,
+    RollResult,
+)
 from oraculo_enom.persistence.history import HistoryRepository
 from oraculo_enom.services.clipboard import format_roll
 from oraculo_enom.ui.history_dialog import HistoryDialog
 
 
-Roller = Callable[[RollRequest], tuple[int, ...]]
+Roller = Callable[[RollRequest], tuple[tuple[int, ...], ...]]
 QUICK_DICE = (4, 6, 8, 10, 12, 16, 20, 50, 100)
 
 
@@ -78,6 +84,25 @@ class MainWindow(QMainWindow):
         title.setObjectName("titleLabel")
         layout.addWidget(title)
 
+        title_row = QHBoxLayout()
+        title_label = QLabel("Título de la tirada")
+        title_row.addWidget(title_label)
+        self.roll_title_edit = QLineEdit()
+        self.roll_title_edit.setObjectName("rollTitleEdit")
+        self.roll_title_edit.setMaxLength(150)
+        self.roll_title_edit.setPlaceholderText("Opcional")
+        title_row.addWidget(self.roll_title_edit, 1)
+        self.clear_roll_title_button = QPushButton("×")
+        self.clear_roll_title_button.setObjectName("clearRollTitleButton")
+        self.clear_roll_title_button.setAccessibleName("Limpiar título")
+        self.clear_roll_title_button.setEnabled(False)
+        self.clear_roll_title_button.clicked.connect(self.roll_title_edit.clear)
+        self.roll_title_edit.textChanged.connect(
+            lambda text: self.clear_roll_title_button.setEnabled(bool(text))
+        )
+        title_row.addWidget(self.clear_roll_title_button)
+        layout.addLayout(title_row)
+
         dice_label = QLabel("ELIGE TU DADO")
         dice_label.setObjectName("sectionLabel")
         layout.addWidget(dice_label)
@@ -120,20 +145,26 @@ class MainWindow(QMainWindow):
         for count in range(1, 11):
             self.quantity_combo.addItem(str(count), count)
         self.quantity_combo.addItem("Personalizada", None)
-        self.quantity_combo.currentIndexChanged.connect(self._update_roll_button)
+        self.quantity_combo.currentIndexChanged.connect(
+            self._set_custom_quantity_enabled
+        )
         options.addWidget(self.quantity_combo, 0, 1)
 
         self.custom_quantity_spin = QSpinBox()
         self.custom_quantity_spin.setObjectName("customQuantitySpin")
         self.custom_quantity_spin.setRange(-9_999, 9_999)
         self.custom_quantity_spin.setValue(11)
-        self.custom_quantity_spin.valueChanged.connect(self._select_custom_quantity)
-        options.addWidget(self.custom_quantity_spin, 0, 2)
+        self.custom_quantity_spin.setEnabled(False)
+        self.custom_quantity_spin.valueChanged.connect(self._update_roll_button)
+        self.custom_quantity_label = QLabel("Cantidad personalizada")
+        self.custom_quantity_label.setObjectName("customQuantityLabel")
+        options.addWidget(self.custom_quantity_label, 0, 2)
+        options.addWidget(self.custom_quantity_spin, 0, 3)
 
         self.show_sum_check = QCheckBox("Mostrar suma")
         self.show_sum_check.setObjectName("showSumCheck")
         self.show_sum_check.setChecked(True)
-        options.addWidget(self.show_sum_check, 0, 3)
+        options.addWidget(self.show_sum_check, 1, 3)
 
         self.filter_check = QCheckBox("Aplicar filtro")
         self.filter_check.setObjectName("filterCheck")
@@ -161,11 +192,20 @@ class MainWindow(QMainWindow):
         self.validation_label.hide()
         layout.addWidget(self.validation_label)
 
+        roll_row = QHBoxLayout()
         self.roll_button = QPushButton()
         self.roll_button.setObjectName("primaryButton")
         self.roll_button.clicked.connect(self._roll)
         self._update_roll_button()
-        layout.addWidget(self.roll_button)
+        roll_row.addWidget(self.roll_button, 1)
+        self.combined_roll_button = QPushButton("Configurar tirada combinada")
+        self.combined_roll_button.setObjectName("combinedRollButton")
+        self.combined_roll_button.setEnabled(False)
+        self.combined_roll_button.setToolTip(
+            "El configurador de tiradas combinadas se habilitará próximamente"
+        )
+        roll_row.addWidget(self.combined_roll_button)
+        layout.addLayout(roll_row)
 
         results_label = QLabel("RESULTADOS")
         results_label.setObjectName("sectionLabel")
@@ -269,9 +309,9 @@ class MainWindow(QMainWindow):
         style.polish(self.custom_sides_spin)
         self.custom_sides_spin.update()
 
-    def _select_custom_quantity(self) -> None:
-        with QSignalBlocker(self.quantity_combo):
-            self.quantity_combo.setCurrentIndex(self.quantity_combo.count() - 1)
+    def _set_custom_quantity_enabled(self) -> None:
+        is_custom = self.quantity_combo.currentData() is None
+        self.custom_quantity_spin.setEnabled(is_custom)
         self._update_roll_button()
 
     def _set_filter_enabled(self, enabled: bool) -> None:
@@ -289,59 +329,68 @@ class MainWindow(QMainWindow):
             f"TIRAR {self._selected_count()}D{self._selected_sides}"
         )
 
-    def _request_from_controls(self) -> RollRequest:
+    def _current_simple_request(self) -> RollRequest:
         comparator = None
         threshold = None
         if self.filter_check.isChecked():
             comparator = Comparator(self.comparator_combo.currentText())
             threshold = self.threshold_spin.value()
-        return RollRequest(
+        component = RollComponentRequest(
             count=self._selected_count(),
             sides=self._selected_sides,
-            show_sum=self.show_sum_check.isChecked(),
             comparator=comparator,
             threshold=threshold,
         )
+        return RollRequest(
+            components=(component,),
+            show_sum=self.show_sum_check.isChecked(),
+            title=self.roll_title_edit.text(),
+        )
 
     def _apply_request(self, request: RollRequest) -> None:
-        if request.sides in self.die_buttons:
-            self._selected_sides = request.sides
-            self.die_buttons[request.sides].setChecked(True)
+        component = request.components[0]
+        if component.sides in self.die_buttons:
+            self._selected_sides = component.sides
+            self.die_buttons[component.sides].setChecked(True)
             self._set_custom_die_selected(False)
         else:
             with QSignalBlocker(self.custom_sides_spin):
-                self.custom_sides_spin.setValue(request.sides)
+                self.custom_sides_spin.setValue(component.sides)
             self._die_group.setExclusive(False)
             for button in self.die_buttons.values():
                 button.setChecked(False)
             self._die_group.setExclusive(True)
-            self._selected_sides = request.sides
+            self._selected_sides = component.sides
             self._set_custom_die_selected(True)
 
         with QSignalBlocker(self.quantity_combo), QSignalBlocker(
             self.custom_quantity_spin
         ):
-            if 1 <= request.count <= 10:
-                self.quantity_combo.setCurrentIndex(request.count - 1)
+            if 1 <= component.count <= 10:
+                self.quantity_combo.setCurrentIndex(component.count - 1)
             else:
-                self.custom_quantity_spin.setValue(request.count)
+                self.custom_quantity_spin.setValue(component.count)
                 self.quantity_combo.setCurrentIndex(self.quantity_combo.count() - 1)
 
+        self._set_custom_quantity_enabled()
+        self.roll_title_edit.setText(request.title)
         self.show_sum_check.setChecked(request.show_sum)
-        filter_enabled = request.comparator is not None
+        filter_enabled = component.comparator is not None
         self.filter_check.setChecked(filter_enabled)
-        if request.comparator is not None:
-            self.comparator_combo.setCurrentText(request.comparator.value)
-        if request.threshold is not None:
-            self.threshold_spin.setValue(request.threshold)
+        if component.comparator is not None:
+            self.comparator_combo.setCurrentText(component.comparator.value)
+        if component.threshold is not None:
+            self.threshold_spin.setValue(component.threshold)
         self._update_roll_button()
 
     def _roll(self) -> None:
+        self._execute_request(self._current_simple_request())
+
+    def _execute_request(self, request: RollRequest) -> None:
         try:
-            request = self._request_from_controls()
             validate_request(request)
-            values = self._roller(request)
-            result = analyze(request, values)
+            values_by_component = self._roller(request)
+            result = analyze(request, values_by_component)
             self._repository.add(result)
         except (ValueError, OSError) as error:
             self.validation_label.setText(str(error))
@@ -354,6 +403,7 @@ class MainWindow(QMainWindow):
         self._last_result = result
         self._render_result(result)
         self._refresh_recent_history()
+        self.repeat_button.setText("Repetir tirada")
         self.repeat_button.setEnabled(True)
         self.copy_button.setEnabled(True)
 
@@ -390,8 +440,9 @@ class MainWindow(QMainWindow):
 
     def _render_result(self, result: RollResult) -> None:
         self._clear_layout(self.results_layout)
-        remaining_matches = Counter(result.matches)
-        for index, value in enumerate(result.values):
+        component = result.components[0]
+        remaining_matches = Counter(component.matches)
+        for index, value in enumerate(component.values):
             badge = QLabel(str(value))
             badge.setObjectName("resultBadge")
             matched = remaining_matches[value] > 0
@@ -403,7 +454,7 @@ class MainWindow(QMainWindow):
 
         self.sum_label.setText(f"Suma: {result.total}")
         self.sum_label.setVisible(result.request.show_sum)
-        if result.request.comparator is None:
+        if component.request.comparator is None:
             self.match_summary_label.clear()
             self.match_summary_label.hide()
         else:
@@ -419,11 +470,12 @@ class MainWindow(QMainWindow):
             Comparator.LESS_OR_EQUAL: "alcanzaron o quedaron por debajo de",
             Comparator.EQUAL: "igualaron",
         }
-        comparator = result.request.comparator
+        component = result.components[0]
+        comparator = component.request.comparator
         assert comparator is not None
         return (
-            f"{len(result.matches)} de {len(result.values)} resultados "
-            f"{verbs[comparator]} {result.request.threshold}"
+            f"{len(component.matches)} de {len(component.values)} resultados "
+            f"{verbs[comparator]} {component.request.threshold}"
         )
 
     def _refresh_recent_history(self) -> None:
@@ -437,9 +489,11 @@ class MainWindow(QMainWindow):
             return
         for record in records:
             result = record.result
+            title = f"{result.request.title}\n" if result.request.title else ""
+            sum_text = f" · Suma {result.total}" if result.total is not None else ""
             entry = QLabel(
                 f"{result.created_at:%d/%m/%Y %H:%M}\n"
-                f"{result.request.notation.upper()} · Suma {result.total}"
+                f"{title}{result.request.notation.upper()}{sum_text}"
             )
             entry.setObjectName("historyEntry")
             entry.setWordWrap(True)

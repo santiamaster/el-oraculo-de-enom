@@ -54,7 +54,7 @@ QLabel#resultBadge[matched="true"] {{
     border: 2px solid {GOLD};
     color: {TEXT};
 }}
-QPushButton, QSpinBox, QComboBox, QDateEdit {{
+QPushButton, QSpinBox, QComboBox, QDateEdit, QLineEdit {{
     background-color: {FIELD};
     border: 1px solid {BORDER};
     border-radius: 5px;
@@ -80,13 +80,20 @@ QSpinBox#customSidesSpin[selected="true"] {{
 QPushButton#primaryButton {{
     min-height: 40px;
 }}
+QLineEdit#rollTitleEdit {{
+    min-height: 30px;
+}}
+QPushButton#clearRollTitleButton {{
+    min-height: 24px;
+    padding: 2px 9px;
+}}
 QPushButton:focus, QSpinBox:focus, QComboBox:focus, QDateEdit:focus,
-QCheckBox:focus {{
+QLineEdit:focus, QCheckBox:focus {{
     border: 2px solid {GOLD};
     outline: none;
 }}
 QPushButton:disabled, QSpinBox:disabled, QComboBox:disabled, QDateEdit:disabled,
-QCheckBox:disabled {{
+QLineEdit:disabled, QCheckBox:disabled {{
     background-color: {PANEL};
     border-color: {BORDER};
     color: {MUTED};
