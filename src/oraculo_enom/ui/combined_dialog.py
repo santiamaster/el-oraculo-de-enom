@@ -97,6 +97,8 @@ class CombinedRollDialog(QDialog):
         self.clear_title_button = QPushButton("×")
         self.clear_title_button.setObjectName("clearCombinedTitleButton")
         self.clear_title_button.setAccessibleName("Limpiar título")
+        self.clear_title_button.setAutoDefault(False)
+        self.clear_title_button.setDefault(False)
         self.clear_title_button.setEnabled(False)
         self.clear_title_button.clicked.connect(self.title_edit.clear)
         general_grid.addWidget(self.clear_title_button, 0, 2)
@@ -158,6 +160,8 @@ class CombinedRollDialog(QDialog):
         editor.addWidget(self.quantity_spin)
         self.add_button = QPushButton("+ Agregar dado")
         self.add_button.setObjectName("addComponentButton")
+        self.add_button.setAutoDefault(False)
+        self.add_button.setDefault(False)
         self.add_button.clicked.connect(self._add_from_editor)
         editor.addWidget(self.add_button)
         editor.addStretch()
@@ -193,16 +197,21 @@ class CombinedRollDialog(QDialog):
         actions = QHBoxLayout()
         self.clear_button = QPushButton("Limpiar configuración")
         self.clear_button.setObjectName("clearConfigurationButton")
+        self.clear_button.setAutoDefault(False)
+        self.clear_button.setDefault(False)
         self.clear_button.clicked.connect(self.clear_configuration)
         actions.addWidget(self.clear_button)
         actions.addStretch()
         self.cancel_button = QPushButton("Cancelar")
         self.cancel_button.setObjectName("cancelCombinedRollButton")
+        self.cancel_button.setAutoDefault(False)
+        self.cancel_button.setDefault(False)
         self.cancel_button.clicked.connect(self.reject)
         actions.addWidget(self.cancel_button)
         self.roll_button = QPushButton("TIRAR COMBINACIÓN")
         self.roll_button.setObjectName("rollCombinedButton")
         self.roll_button.setProperty("primary", True)
+        self.roll_button.setDefault(True)
         self.roll_button.clicked.connect(self._submit)
         actions.addWidget(self.roll_button)
         root.addLayout(actions)
@@ -334,6 +343,8 @@ class CombinedRollDialog(QDialog):
 
         remove_button = QPushButton("Eliminar")
         remove_button.setObjectName(f"component{sides}RemoveButton")
+        remove_button.setAutoDefault(False)
+        remove_button.setDefault(False)
         self.component_table.setCellWidget(table_row, 5, remove_button)
 
         row = _ComponentRow(
@@ -398,10 +409,13 @@ class CombinedRollDialog(QDialog):
         )
         try:
             validate_request(request)
-        except ValueError:
+        except ValueError as error:
             self.roll_button.setEnabled(False)
+            if request.components:
+                self._show_error(str(error))
         else:
             self.roll_button.setEnabled(True)
+            self._clear_error()
 
     def _submit(self) -> None:
         request = self.current_request()

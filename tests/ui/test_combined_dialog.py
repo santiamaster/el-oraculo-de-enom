@@ -124,6 +124,29 @@ def test_rejects_addition_that_would_exceed_one_thousand_dice(qtbot) -> None:
     )
 
 
+def test_editing_counts_shows_and_clears_total_limit_message(qtbot) -> None:
+    dialog = CombinedRollDialog()
+    qtbot.addWidget(dialog)
+    dialog.add_component(RollComponentRequest(500, 6))
+    dialog.add_component(RollComponentRequest(500, 8))
+    d6_count = row_control(dialog, 6, "CountSpin")
+
+    d6_count.setValue(501)
+
+    assert not dialog.roll_button.isEnabled()
+    assert (
+        dialog.validation_label.text()
+        == "La cantidad total de dados debe estar entre 1 y 1.000"
+    )
+    assert dialog.validation_label.isVisibleTo(dialog)
+
+    d6_count.setValue(500)
+
+    assert dialog.roll_button.isEnabled()
+    assert dialog.validation_label.text() == ""
+    assert dialog.validation_label.isHidden()
+
+
 def test_each_row_owns_an_independent_optional_filter(qtbot) -> None:
     dialog = CombinedRollDialog()
     qtbot.addWidget(dialog)
@@ -223,6 +246,36 @@ def test_valid_submission_emits_one_immutable_request_and_accepts(qtbot) -> None
     ]
     assert isinstance(received[0].components, tuple)
     assert dialog.result() == QDialog.DialogCode.Accepted
+
+
+def test_enter_in_title_submits_without_triggering_destructive_actions(qtbot) -> None:
+    dialog = CombinedRollDialog()
+    qtbot.addWidget(dialog)
+    received: list[RollRequest] = []
+    dialog.roll_requested.connect(received.append)
+    dialog.add_component(RollComponentRequest(1, 6))
+    dialog.set_title("Ataque con Enter")
+    dialog.show()
+    dialog.title_edit.setFocus()
+
+    qtbot.keyClick(dialog.title_edit, Qt.Key.Key_Return)
+
+    assert dialog.title_edit.text() == "Ataque con Enter"
+    assert received == [
+        RollRequest(
+            (RollComponentRequest(1, 6),),
+            show_sum=True,
+            title="Ataque con Enter",
+        )
+    ]
+    assert dialog.result() == QDialog.DialogCode.Accepted
+    destructive_buttons = (
+        dialog.clear_title_button,
+        dialog.clear_button,
+        row_control(dialog, 6, "RemoveButton"),
+    )
+    assert all(not button.autoDefault() for button in destructive_buttons)
+    assert all(not button.isDefault() for button in destructive_buttons)
 
 
 def test_invalid_submission_emits_nothing_and_shows_actionable_message(qtbot) -> None:
