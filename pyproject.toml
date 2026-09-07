@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "el-oraculo-de-enom"
 version = "0.1.0"
 requires-python = ">=3.12"
+license = "GPL-2.0-or-later"
 dependencies = ["PySide6>=6.8,<7"]
 
 [project.optional-dependencies]

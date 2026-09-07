@@ -91,6 +91,10 @@ pyproject.toml
 
 El flujo se ejecuta para cambios en `main`, pull requests y etiquetas que comienzan con `v`. Solo publica un artefacto de Actions; no crea una GitHub Release.
 
+## Licencia
+
+El Oráculo de ENOM se distribuye bajo la licencia [GNU General Public License v2.0 o posterior](LICENSE), identificada mediante SPDX como `GPL-2.0-or-later`.
+
 ## Captura
 
 No se incluye una captura hasta disponer de una imagen real de la aplicación terminada.
