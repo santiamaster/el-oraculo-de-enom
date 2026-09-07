@@ -17,10 +17,15 @@ QMainWindow, QDialog, QWidget {{
     font-family: "Segoe UI", sans-serif;
     font-size: 10pt;
 }}
-QFrame#panel, QFrame#summaryCard {{
+QFrame#panel, QFrame#summaryCard, QFrame#dialogSection {{
     background-color: {PANEL};
     border: 1px solid {BORDER};
     border-radius: 8px;
+}}
+QFrame#combinedSummaryCard {{
+    background-color: {FIELD};
+    border: 1px solid {BORDER};
+    border-radius: 6px;
 }}
 QLabel#titleLabel {{
     color: {GOLD};
@@ -32,7 +37,27 @@ QLabel#sectionLabel {{
     font-size: 12pt;
     font-weight: 700;
 }}
+QLabel#dialogSectionLabel {{
+    color: {GOLD};
+    font-size: 12pt;
+    font-weight: 700;
+}}
+QLabel#combinedPreviewLabel {{
+    color: {GOLD};
+    font-size: 22pt;
+    font-weight: 700;
+}}
+QLabel#combinedTotalCountLabel, QLabel#limitsLabel {{
+    color: {MUTED};
+}}
 QLabel#validationLabel {{
+    background-color: #3a1d18;
+    border: 1px solid #b65d4d;
+    border-radius: 5px;
+    color: #ffd7ce;
+    padding: 7px;
+}}
+QLabel#combinedValidationLabel {{
     background-color: #3a1d18;
     border: 1px solid #b65d4d;
     border-radius: 5px;
@@ -70,6 +95,13 @@ QPushButton:checked, QPushButton#primaryButton {{
     border: 1px solid {GOLD};
     color: {TEXT};
     font-weight: 700;
+}}
+QPushButton#rollCombinedButton {{
+    background-color: {GOLD_DARK};
+    border: 1px solid {GOLD};
+    color: {TEXT};
+    font-weight: 700;
+    min-height: 36px;
 }}
 QSpinBox#customSidesSpin[selected="true"] {{
     background-color: {GOLD_DARK};
