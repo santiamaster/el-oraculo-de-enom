@@ -24,6 +24,8 @@ No cubre todavía la publicación de `1.0.0`, firma digital, SBOM, avisos de ter
 
 La ventana principal conserva el flujo rápido para una tirada de un solo tipo. La configuración combinada vive en una ventana independiente, visualmente coherente con el tema Fantasía/RPG pero deliberadamente más densa y funcional, como una sección de opciones avanzadas.
 
+La composición visual aprobada se conserva en `docs/assets/combined-roll-dialog-mockup.png`. Es una referencia de jerarquía, distribución y contenido; los controles finales deben usar widgets nativos de PySide6 y respetar el comportamiento definido en este documento.
+
 Las tiradas simples y combinadas compartirán el mismo modelo de dominio, persistencia, representación de resultados e historial. Una tirada simple será una tirada con un único componente, evitando dos caminos de negocio diferentes.
 
 ## Interfaz principal
