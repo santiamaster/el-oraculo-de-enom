@@ -8,6 +8,10 @@ HISTORY_STORAGE_ERROR = (
     "No se puede guardar el historial en esta ubicación. Mové la aplicación a una "
     "carpeta con permisos de escritura."
 )
+SCHEMA_RESET_REQUIRED = (
+    "El historial pertenece a una versión de prueba anterior. Cerrá la aplicación "
+    "y mové o eliminá datos/historial.db antes de continuar."
+)
 
 
 def application_dir() -> Path:
