@@ -53,11 +53,18 @@ class RollRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class RollComponentResult:
+    request: RollComponentRequest
+    values: tuple[int, ...]
+    subtotal: int | None
+    matches: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class RollResult:
     request: RollRequest
-    values: tuple[int, ...]
-    total: int
-    matches: tuple[int, ...]
+    components: tuple[RollComponentResult, ...]
+    total: int | None
     created_at: datetime
 
 
