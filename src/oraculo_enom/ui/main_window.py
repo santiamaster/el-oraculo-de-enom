@@ -34,6 +34,7 @@ from oraculo_enom.domain.models import (
 )
 from oraculo_enom.persistence.history import HistoryRepository
 from oraculo_enom.services.clipboard import format_roll
+from oraculo_enom.ui.combined_dialog import CombinedRollDialog
 from oraculo_enom.ui.history_dialog import HistoryDialog
 
 
@@ -55,6 +56,7 @@ class MainWindow(QMainWindow):
         self._selected_sides = 20
         self._last_request: RollRequest | None = None
         self._last_result: RollResult | None = None
+        self._combined_dialog: CombinedRollDialog | None = None
         self._history_dialog: HistoryDialog | None = None
 
         self.setWindowTitle("El Oráculo de ENOM")
@@ -200,10 +202,7 @@ class MainWindow(QMainWindow):
         roll_row.addWidget(self.roll_button, 1)
         self.combined_roll_button = QPushButton("Configurar tirada combinada")
         self.combined_roll_button.setObjectName("combinedRollButton")
-        self.combined_roll_button.setEnabled(False)
-        self.combined_roll_button.setToolTip(
-            "El configurador de tiradas combinadas se habilitará próximamente"
-        )
+        self.combined_roll_button.clicked.connect(self._open_combined_roll)
         roll_row.addWidget(self.combined_roll_button)
         layout.addLayout(roll_row)
 
@@ -399,19 +398,35 @@ class MainWindow(QMainWindow):
 
         self.validation_label.clear()
         self.validation_label.hide()
+        self.roll_title_edit.setText(request.title)
         self._last_request = request
         self._last_result = result
         self._render_result(result)
         self._refresh_recent_history()
-        self.repeat_button.setText("Repetir tirada")
+        self.repeat_button.setText(
+            "Repetir tirada combinada" if request.is_combined else "Repetir tirada"
+        )
         self.repeat_button.setEnabled(True)
         self.copy_button.setEnabled(True)
 
     def _repeat_last_roll(self) -> None:
         if self._last_request is None:
             return
-        self._apply_request(self._last_request)
-        self._roll()
+        self._repeat_request(self._last_request)
+
+    def _repeat_request(self, request: RollRequest) -> None:
+        if not request.is_combined:
+            self._apply_request(request)
+        self._execute_request(request)
+
+    def _open_combined_roll(self) -> None:
+        if self._combined_dialog is None:
+            self._combined_dialog = CombinedRollDialog(self)
+            self._combined_dialog.set_title(self.roll_title_edit.text())
+            self._combined_dialog.roll_requested.connect(self._execute_request)
+        self._combined_dialog.show()
+        self._combined_dialog.raise_()
+        self._combined_dialog.activateWindow()
 
     def _open_full_history(self) -> None:
         if self._history_dialog is None:
@@ -430,8 +445,7 @@ class MainWindow(QMainWindow):
     def _repeat_from_history(self, request: RollRequest) -> None:
         if self._history_dialog is not None:
             self._history_dialog.close()
-        self._apply_request(request)
-        self._roll()
+        self._repeat_request(request)
 
     def _copy_last_roll(self) -> None:
         if self._last_result is None:
@@ -440,21 +454,56 @@ class MainWindow(QMainWindow):
 
     def _render_result(self, result: RollResult) -> None:
         self._clear_layout(self.results_layout)
-        component = result.components[0]
-        remaining_matches = Counter(component.matches)
-        for index, value in enumerate(component.values):
-            badge = QLabel(str(value))
-            badge.setObjectName("resultBadge")
-            matched = remaining_matches[value] > 0
-            badge.setProperty("matched", matched)
-            if matched:
-                remaining_matches[value] -= 1
-            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.results_layout.addWidget(badge, index // 12, index % 12)
+        row = 0
+        for component in result.components:
+            count = len(component.values)
+            roll_word = "tirada" if count == 1 else "tiradas"
+            group_label = QLabel(
+                f"d{component.request.sides} — {count} {roll_word}"
+            )
+            group_label.setObjectName("resultGroupLabel")
+            self.results_layout.addWidget(group_label, row, 0, 1, 12)
+            row += 1
 
-        self.sum_label.setText(f"Suma: {result.total}")
+            remaining_matches = Counter(component.matches)
+            for index, value in enumerate(component.values):
+                badge = QLabel(str(value))
+                badge.setObjectName("resultBadge")
+                matched = remaining_matches[value] > 0
+                badge.setProperty("matched", matched)
+                if matched:
+                    remaining_matches[value] -= 1
+                badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.results_layout.addWidget(
+                    badge, row + index // 12, index % 12
+                )
+            row += max(1, (count + 11) // 12)
+
+            if result.request.is_combined and result.request.show_sum:
+                subtotal_label = QLabel(f"Subtotal: {component.subtotal}")
+                subtotal_label.setObjectName("componentSubtotalLabel")
+                self.results_layout.addWidget(subtotal_label, row, 0, 1, 12)
+                row += 1
+            if (
+                result.request.is_combined
+                and component.request.comparator is not None
+            ):
+                filter_label = QLabel(
+                    f"Filtro {component.request.comparator.value} "
+                    f"{component.request.threshold}: {len(component.matches)} "
+                    f"de {len(component.values)}"
+                )
+                filter_label.setObjectName("componentMatchSummaryLabel")
+                self.results_layout.addWidget(filter_label, row, 0, 1, 12)
+                row += 1
+
+        total_prefix = "Suma total" if result.request.is_combined else "Suma"
+        self.sum_label.setText(f"{total_prefix}: {result.total}")
         self.sum_label.setVisible(result.request.show_sum)
-        if component.request.comparator is None:
+        if (
+            result.request.is_combined
+            or result.components[0].request.comparator is None
+        ):
             self.match_summary_label.clear()
             self.match_summary_label.hide()
         else:

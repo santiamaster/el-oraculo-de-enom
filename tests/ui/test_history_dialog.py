@@ -4,9 +4,22 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+)
 
-from oraculo_enom.domain.models import Comparator, RollRecord, RollRequest, RollResult
+from oraculo_enom.domain.analysis import analyze
+from oraculo_enom.domain.models import (
+    Comparator,
+    RollComponentRequest,
+    RollRecord,
+    RollRequest,
+)
 from oraculo_enom.persistence.history import HistoryRepository
 from oraculo_enom.services.paths import HISTORY_STORAGE_ERROR
 from oraculo_enom.ui.history_dialog import HistoryDialog
@@ -23,31 +36,61 @@ def repository(tmp_path: Path) -> Iterator[HistoryRepository]:
 def add_roll(
     repository: HistoryRepository,
     *,
-    sides: int,
-    values: tuple[int, ...],
+    sides: int | None = None,
+    values: tuple[int, ...] = (),
     created_at: datetime,
     show_sum: bool = True,
     comparator: Comparator | None = None,
     threshold: int | None = None,
+    title: str = "",
+    components: tuple[
+        tuple[RollComponentRequest, tuple[int, ...]], ...
+    ] | None = None,
 ) -> RollRecord:
+    if components is None:
+        assert sides is not None
+        components = (
+            (
+                RollComponentRequest(
+                    len(values), sides, comparator, threshold
+                ),
+                values,
+            ),
+        )
     request = RollRequest(
-        count=len(values),
-        sides=sides,
+        tuple(component for component, _ in components),
         show_sum=show_sum,
-        comparator=comparator,
-        threshold=threshold,
+        title=title,
     )
-    matches = ()
-    if comparator is Comparator.GREATER_OR_EQUAL and threshold is not None:
-        matches = tuple(value for value in values if value >= threshold)
-    result = RollResult(
-        request=request,
-        values=values,
-        total=sum(values),
-        matches=matches,
+    result = analyze(
+        request,
+        tuple(component_values for _, component_values in components),
         created_at=created_at,
     )
     return repository.add(result)
+
+
+def add_combined_roll(
+    repository: HistoryRepository,
+    *,
+    title: str = "Ataque combinado de Arhat",
+) -> RollRecord:
+    return add_roll(
+        repository,
+        title=title,
+        created_at=datetime(2026, 9, 7, 10, 15),
+        components=(
+            (
+                RollComponentRequest(2, 6, Comparator.GREATER_OR_EQUAL, 5),
+                (4, 6),
+            ),
+            (RollComponentRequest(1, 8), (7,)),
+            (
+                RollComponentRequest(3, 20, Comparator.GREATER_THAN, 12),
+                (3, 15, 19),
+            ),
+        ),
+    )
 
 
 def seed_three(
@@ -100,6 +143,69 @@ def test_records_are_newest_first_and_selection_shows_read_only_details(
         "Filtro >= 16: 2 de 3"
     )
     assert dialog.selected_record_id == middle.id
+
+
+def test_combined_history_shows_title_notation_and_all_component_details(
+    qtbot, repository: HistoryRepository
+) -> None:
+    """Catches history flattening a combined record to its first component."""
+    combined = add_combined_roll(repository)
+    dialog = HistoryDialog(repository)
+    qtbot.addWidget(dialog)
+
+    assert dialog.records_table.item(0, 1).text() == (
+        "Ataque combinado de Arhat\n2D6 + 1D8 + 3D20"
+    )
+    assert dialog.records_table.item(0, 2).text() == (
+        "d6: 4, 6 | d8: 7 | d20: 3, 15, 19"
+    )
+
+    dialog.records_table.selectRow(0)
+    clipboard = QApplication.clipboard()
+    clipboard.clear()
+    qtbot.mouseClick(dialog.copy_button, Qt.MouseButton.LeftButton)
+
+    expected_detail = (
+        "Fecha: 07/09/2026 10:15\n"
+        "Ataque combinado de Arhat\n"
+        "2d6: 4, 6\nSubtotal d6: 10\nFiltro d6 >= 5: 1 de 2\n"
+        "1d8: 7\nSubtotal d8: 7\n"
+        "3d20: 3, 15, 19\nSubtotal d20: 37\n"
+        "Filtro d20 > 12: 2 de 3\nSuma total: 54"
+    )
+    assert dialog.selected_record_id == combined.id
+    assert dialog.detail_view.toPlainText() == expected_detail
+    assert clipboard.text() == expected_detail.split("\n", 1)[1]
+
+
+def test_title_search_is_case_insensitive_and_sides_match_any_component(
+    qtbot, repository: HistoryRepository
+) -> None:
+    """Catches UI filters omitting title input or checking only the first group."""
+    combined = add_combined_roll(repository, title="Ataque combinado de ARHAT")
+    add_roll(
+        repository,
+        sides=8,
+        values=(2,),
+        title="Exploración",
+        created_at=datetime(2026, 9, 6, 10, 15),
+    )
+    dialog = HistoryDialog(repository)
+    qtbot.addWidget(dialog)
+
+    dialog.title_search.setText("arhat")
+
+    assert dialog.records_table.rowCount() == 1
+    assert (
+        dialog.records_table.item(0, 0).data(Qt.ItemDataRole.UserRole)
+        == combined.id
+    )
+    dialog.sides_filter.setCurrentIndex(dialog.sides_filter.findData(20))
+    assert dialog.records_table.rowCount() == 1
+    assert (
+        dialog.records_table.item(0, 0).data(Qt.ItemDataRole.UserRole)
+        == combined.id
+    )
 
 
 def test_optional_side_and_inclusive_date_filters_limit_visible_rows(
@@ -181,8 +287,180 @@ def test_repeat_emits_the_selected_records_configuration(
     qtbot.mouseClick(dialog.repeat_button, Qt.MouseButton.LeftButton)
 
     assert received == [
-        RollRequest(3, 20, True, Comparator.GREATER_OR_EQUAL, 16)
+        RollRequest(
+            (RollComponentRequest(3, 20, Comparator.GREATER_OR_EQUAL, 16),),
+            show_sum=True,
+        )
     ]
+
+
+def test_repeat_emits_every_combined_component_in_order(
+    qtbot, repository: HistoryRepository
+) -> None:
+    """Catches history repeat rebuilding only the first combined component."""
+    combined = add_combined_roll(repository)
+    dialog = HistoryDialog(repository)
+    qtbot.addWidget(dialog)
+    received: list[RollRequest] = []
+    dialog.repeat_requested.connect(received.append)
+
+    dialog.records_table.selectRow(0)
+    qtbot.mouseClick(dialog.repeat_button, Qt.MouseButton.LeftButton)
+
+    assert received == [combined.result.request]
+
+
+def test_title_edit_updates_repository_detail_and_recent_history_immediately(
+    qtbot,
+    repository: HistoryRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches successful edits leaving either history view stale."""
+    record = add_combined_roll(repository, title="Título original")
+    window = MainWindow(repository)
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.mouseClick(window.full_history_button, Qt.MouseButton.LeftButton)
+    dialog = window.findChild(HistoryDialog)
+    assert dialog is not None
+    dialog.records_table.selectRow(0)
+
+    def accept_corrected(input_dialog: QInputDialog) -> int:
+        input_dialog.setTextValue("Título corregido")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QInputDialog, "exec", accept_corrected)
+    qtbot.mouseClick(dialog.edit_title_button, Qt.MouseButton.LeftButton)
+
+    assert repository.recent(1)[0].result.request.title == "Título corregido"
+    assert dialog.selected_record_id == record.id
+    assert dialog.records_table.item(0, 1).text().startswith(
+        "Título corregido\n"
+    )
+    assert "Título corregido" in dialog.detail_view.toPlainText()
+    [recent_entry] = window.recent_history_widget.findChildren(
+        QLabel, "historyEntry"
+    )
+    assert "Título corregido\n2D6 + 1D8 + 3D20" in recent_entry.text()
+
+
+def test_title_edit_cancellation_preserves_record_and_selection(
+    qtbot,
+    repository: HistoryRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches cancellation being treated as an empty-title edit."""
+    record = add_combined_roll(repository)
+    dialog = HistoryDialog(repository)
+    qtbot.addWidget(dialog)
+    dialog.records_table.selectRow(0)
+    original_row = dialog.records_table.item(0, 1).text()
+    original_detail = dialog.detail_view.toPlainText()
+    changes: list[str] = []
+    dialog.history_changed.connect(lambda: changes.append("changed"))
+    monkeypatch.setattr(
+        QInputDialog, "exec", lambda input_dialog: QDialog.DialogCode.Rejected
+    )
+
+    qtbot.mouseClick(dialog.edit_title_button, Qt.MouseButton.LeftButton)
+
+    assert repository.recent(1)[0].result.request.title == record.result.request.title
+    assert dialog.selected_record_id == record.id
+    assert dialog.records_table.item(0, 1).text() == original_row
+    assert dialog.detail_view.toPlainText() == original_detail
+    assert changes == []
+
+
+def test_title_edit_accepts_empty_text_and_keeps_the_updated_row_selected(
+    qtbot,
+    repository: HistoryRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches empty optional titles being rejected or shown as stale."""
+    record = add_combined_roll(repository)
+    dialog = HistoryDialog(repository)
+    qtbot.addWidget(dialog)
+    dialog.records_table.selectRow(0)
+
+    def accept_empty(input_dialog: QInputDialog) -> int:
+        input_dialog.setTextValue("")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QInputDialog, "exec", accept_empty)
+    qtbot.mouseClick(dialog.edit_title_button, Qt.MouseButton.LeftButton)
+
+    assert repository.recent(1)[0].result.request.title == ""
+    assert dialog.selected_record_id == record.id
+    assert dialog.records_table.item(0, 1).text() == "2D6 + 1D8 + 3D20"
+    assert "Ataque combinado" not in dialog.detail_view.toPlainText()
+
+
+def test_title_edit_input_is_bounded_to_one_hundred_fifty_characters(
+    qtbot,
+    repository: HistoryRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches the edit dialog accepting a title the repository must reject."""
+    add_combined_roll(repository)
+    dialog = HistoryDialog(repository)
+    qtbot.addWidget(dialog)
+    dialog.records_table.selectRow(0)
+    limits: list[int] = []
+
+    def accept_overlong(input_dialog: QInputDialog) -> int:
+        editor = input_dialog.findChild(QLineEdit)
+        assert editor is not None
+        limits.append(editor.maxLength())
+        input_dialog.setTextValue("x" * 151)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QInputDialog, "exec", accept_overlong)
+    qtbot.mouseClick(dialog.edit_title_button, Qt.MouseButton.LeftButton)
+
+    assert limits == [150]
+    assert repository.recent(1)[0].result.request.title == "x" * 150
+
+
+def test_title_edit_storage_failure_preserves_row_detail_and_selection(
+    qtbot,
+    repository: HistoryRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches a failed title write refreshing away the visible selection."""
+    record = add_combined_roll(repository)
+    dialog = HistoryDialog(repository)
+    qtbot.addWidget(dialog)
+    dialog.records_table.selectRow(0)
+    original_row = dialog.records_table.item(0, 1).text()
+    original_detail = dialog.detail_view.toPlainText()
+    messages: list[tuple[str, str]] = []
+    changes: list[str] = []
+    dialog.history_changed.connect(lambda: changes.append("changed"))
+
+    def accept_changed(input_dialog: QInputDialog) -> int:
+        input_dialog.setTextValue("No persistido")
+        return QDialog.DialogCode.Accepted
+
+    def fail_to_update(record_id: int, title: str) -> RollRecord:
+        raise OSError(HISTORY_STORAGE_ERROR)
+
+    monkeypatch.setattr(QInputDialog, "exec", accept_changed)
+    monkeypatch.setattr(repository, "update_title", fail_to_update)
+    monkeypatch.setattr(
+        QMessageBox,
+        "critical",
+        lambda parent, title, message: messages.append((title, message)),
+    )
+
+    qtbot.mouseClick(dialog.edit_title_button, Qt.MouseButton.LeftButton)
+
+    assert messages == [
+        ("No se pudo actualizar el historial", HISTORY_STORAGE_ERROR)
+    ]
+    assert dialog.selected_record_id == record.id
+    assert dialog.records_table.item(0, 1).text() == original_row
+    assert dialog.detail_view.toPlainText() == original_detail
+    assert changes == []
 
 
 def test_delete_removes_only_the_selected_record_and_refreshes_rows(
@@ -356,9 +634,9 @@ def test_main_window_history_repeat_closes_dialog_and_rolls_fresh_values(
     )
     received_requests: list[RollRequest] = []
 
-    def fresh_roller(request: RollRequest) -> tuple[int, ...]:
+    def fresh_roller(request: RollRequest) -> tuple[tuple[int, ...], ...]:
         received_requests.append(request)
-        return (5, 6)
+        return ((5, 6),)
 
     window = MainWindow(repository, roller=fresh_roller)
     qtbot.addWidget(window)
@@ -372,11 +650,11 @@ def test_main_window_history_repeat_closes_dialog_and_rolls_fresh_values(
     dialog.records_table.selectRow(0)
     qtbot.mouseClick(dialog.repeat_button, Qt.MouseButton.LeftButton)
 
-    expected = RollRequest(2, 6, False)
+    expected = RollRequest((RollComponentRequest(2, 6),), show_sum=False)
     assert received_requests == [expected]
     assert not dialog.isVisible()
     assert repository.recent(1)[0].id != stored.id
-    assert repository.recent(1)[0].result.values == (5, 6)
+    assert repository.recent(1)[0].result.components[0].values == (5, 6)
     assert window.die_buttons[6].isChecked()
     assert window.quantity_combo.currentData() == 2
     assert not window.show_sum_check.isChecked()

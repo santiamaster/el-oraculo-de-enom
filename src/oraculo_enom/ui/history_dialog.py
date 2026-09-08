@@ -12,7 +12,9 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -21,7 +23,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from oraculo_enom.domain.models import RollRecord, RollRequest
+from oraculo_enom.domain.models import MAX_TITLE_LENGTH, RollRecord, RollRequest
 from oraculo_enom.persistence.history import HistoryRepository
 from oraculo_enom.services.clipboard import format_roll
 
@@ -65,6 +67,12 @@ class HistoryDialog(QDialog):
         layout.addWidget(heading)
 
         filters = QHBoxLayout()
+        filters.addWidget(QLabel("Título"))
+        self.title_search = QLineEdit()
+        self.title_search.setObjectName("historyTitleSearch")
+        self.title_search.setPlaceholderText("Buscar por título")
+        self.title_search.textChanged.connect(self.refresh)
+        filters.addWidget(self.title_search)
         filters.addWidget(QLabel("Dado"))
         self.sides_filter = QComboBox()
         self.sides_filter.setObjectName("historySidesFilter")
@@ -128,6 +136,10 @@ class HistoryDialog(QDialog):
         layout.addWidget(self.detail_view)
 
         action_row = QHBoxLayout()
+        self.edit_title_button = QPushButton("Editar título")
+        self.edit_title_button.setObjectName("editHistoryTitleButton")
+        self.edit_title_button.clicked.connect(self._edit_selected_title)
+        action_row.addWidget(self.edit_title_button)
         self.copy_button = QPushButton("Copiar")
         self.copy_button.clicked.connect(self._copy_selected)
         action_row.addWidget(self.copy_button)
@@ -152,7 +164,13 @@ class HistoryDialog(QDialog):
     def _populate_sides_filter(self) -> None:
         selected_sides = self.sides_filter.currentData()
         records = self._repository.search()
-        sides = sorted({record.result.request.sides for record in records})
+        sides = sorted(
+            {
+                component.sides
+                for record in records
+                for component in record.result.request.components
+            }
+        )
         with QSignalBlocker(self.sides_filter):
             self.sides_filter.clear()
             self.sides_filter.addItem("Todos", None)
@@ -171,6 +189,7 @@ class HistoryDialog(QDialog):
                 self.start_date_check, self.start_date_edit
             ),
             date_to=self._selected_date(self.end_date_check, self.end_date_edit),
+            title=self.title_search.text() or None,
         )
         self._records_by_id = {record.id: record for record in records}
 
@@ -185,15 +204,25 @@ class HistoryDialog(QDialog):
                 date_item.setData(Qt.ItemDataRole.UserRole, record.id)
                 self.records_table.setItem(row, 0, date_item)
                 self.records_table.setItem(
-                    row, 1, QTableWidgetItem(result.request.notation.upper())
+                    row, 1, QTableWidgetItem(self._roll_label(result.request))
                 )
                 self.records_table.setItem(
                     row,
                     2,
-                    QTableWidgetItem(", ".join(str(value) for value in result.values)),
+                    QTableWidgetItem(
+                        " | ".join(
+                            f"d{component.request.sides}: "
+                            + ", ".join(str(value) for value in component.values)
+                            for component in result.components
+                        )
+                    ),
                 )
                 self.records_table.setItem(
-                    row, 3, QTableWidgetItem(str(result.total))
+                    row,
+                    3,
+                    QTableWidgetItem(
+                        str(result.total) if result.total is not None else ""
+                    ),
                 )
             self.records_table.clearSelection()
             self.records_table.setCurrentItem(None)
@@ -201,6 +230,11 @@ class HistoryDialog(QDialog):
         self.detail_view.clear()
         self._set_selection_actions_enabled(False)
         self.clear_all_button.setEnabled(self.sides_filter.count() > 1)
+
+    @staticmethod
+    def _roll_label(request: RollRequest) -> str:
+        title = f"{request.title}\n" if request.title else ""
+        return f"{title}{request.notation.upper()}"
 
     @staticmethod
     def _selected_date(check: QCheckBox, editor: QDateEdit) -> date | None:
@@ -248,6 +282,7 @@ class HistoryDialog(QDialog):
         )
 
     def _set_selection_actions_enabled(self, enabled: bool) -> None:
+        self.edit_title_button.setEnabled(enabled)
         self.copy_button.setEnabled(enabled)
         self.repeat_button.setEnabled(enabled)
         self.delete_button.setEnabled(enabled)
@@ -261,6 +296,45 @@ class HistoryDialog(QDialog):
         record = self._selected_record()
         if record is not None:
             self.repeat_requested.emit(record.result.request)
+
+    def _edit_selected_title(self) -> None:
+        record = self._selected_record()
+        if record is None:
+            return
+
+        input_dialog = QInputDialog(self)
+        input_dialog.setWindowTitle("Editar título")
+        input_dialog.setLabelText("Título de la tirada")
+        input_dialog.setTextValue(record.result.request.title)
+        editor = input_dialog.findChild(QLineEdit)
+        if editor is not None:
+            editor.setMaxLength(MAX_TITLE_LENGTH)
+        if input_dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        try:
+            updated = self._repository.update_title(
+                record.id, input_dialog.textValue()
+            )
+        except OSError as error:
+            QMessageBox.critical(
+                self, "No se pudo actualizar el historial", str(error)
+            )
+            return
+
+        self.refresh()
+        self._select_record(updated.id)
+        self.history_changed.emit()
+
+    def _select_record(self, record_id: int) -> None:
+        for row in range(self.records_table.rowCount()):
+            item = self.records_table.item(row, 0)
+            if (
+                item is not None
+                and item.data(Qt.ItemDataRole.UserRole) == record_id
+            ):
+                self.records_table.selectRow(row)
+                return
 
     def _delete_selected(self) -> None:
         record_id = self.selected_record_id

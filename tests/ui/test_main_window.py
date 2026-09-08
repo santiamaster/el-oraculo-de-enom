@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication, QLabel
 
 from oraculo_enom.domain.models import Comparator, RollComponentRequest, RollRequest
 from oraculo_enom.persistence.history import HistoryRepository
+from oraculo_enom.ui.combined_dialog import CombinedRollDialog
 from oraculo_enom.ui.main_window import MainWindow
 
 
@@ -29,6 +30,18 @@ def simple_request(
         (RollComponentRequest(count, sides, comparator, threshold),),
         show_sum=show_sum,
         title=title,
+    )
+
+
+def combined_request(*, show_sum: bool = True) -> RollRequest:
+    return RollRequest(
+        (
+            RollComponentRequest(2, 6, Comparator.GREATER_OR_EQUAL, 5),
+            RollComponentRequest(1, 8),
+            RollComponentRequest(3, 20, Comparator.GREATER_THAN, 12),
+        ),
+        show_sum=show_sum,
+        title="Ataque combinado de Arhat",
     )
 
 
@@ -122,6 +135,155 @@ def test_required_controls_have_stable_object_names(
     assert window.clear_roll_title_button.objectName() == "clearRollTitleButton"
     assert window.combined_roll_button.objectName() == "combinedRollButton"
     assert window.combined_roll_button.text() == "Configurar tirada combinada"
+
+
+def test_combined_builder_executes_once_and_renders_every_ordered_group(
+    qtbot, repository: HistoryRepository
+) -> None:
+    """Catches combined submission bypassing the one atomic execution path."""
+    received_requests: list[RollRequest] = []
+
+    def deterministic_roller(request: RollRequest) -> tuple[tuple[int, ...], ...]:
+        received_requests.append(request)
+        return ((4, 6), (7,), (3, 15, 19))
+
+    window = MainWindow(repository, roller=deterministic_roller)
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.mouseClick(window.combined_roll_button, Qt.MouseButton.LeftButton)
+    dialog = window.findChild(CombinedRollDialog)
+    assert dialog is not None
+    dialog.set_title("Ataque combinado de Arhat")
+    for component in combined_request().components:
+        dialog.add_component(component)
+
+    qtbot.mouseClick(dialog.roll_button, Qt.MouseButton.LeftButton)
+
+    assert not dialog.isVisible()
+    assert received_requests == [combined_request()]
+    [stored] = repository.recent()
+    assert stored.result.request == combined_request()
+    assert [component.values for component in stored.result.components] == [
+        (4, 6),
+        (7,),
+        (3, 15, 19),
+    ]
+    group_labels = window.results_widget.findChildren(QLabel, "resultGroupLabel")
+    assert [label.text() for label in group_labels] == [
+        "d6 — 2 tiradas",
+        "d8 — 1 tirada",
+        "d20 — 3 tiradas",
+    ]
+    badges = window.results_widget.findChildren(QLabel, "resultBadge")
+    assert [badge.text() for badge in badges] == ["4", "6", "7", "3", "15", "19"]
+    assert [badge.property("matched") for badge in badges] == [
+        False,
+        True,
+        False,
+        False,
+        True,
+        True,
+    ]
+    subtotals = window.results_widget.findChildren(QLabel, "componentSubtotalLabel")
+    assert [label.text() for label in subtotals] == [
+        "Subtotal: 10",
+        "Subtotal: 7",
+        "Subtotal: 37",
+    ]
+    component_filters = window.results_widget.findChildren(
+        QLabel, "componentMatchSummaryLabel"
+    )
+    assert [label.text() for label in component_filters] == [
+        "Filtro >= 5: 1 de 2",
+        "Filtro > 12: 2 de 3",
+    ]
+    assert window.sum_label.text() == "Suma total: 54"
+    assert window.roll_title_edit.text() == "Ataque combinado de Arhat"
+
+
+def test_combined_repeat_is_immediate_then_simple_roll_replaces_repeat_context(
+    qtbot, repository: HistoryRepository
+) -> None:
+    """Catches repeat reopening the builder or retaining stale combined state."""
+    generated = iter(
+        (
+            ((1, 2), (3,), (4, 5, 6)),
+            ((5, 6), (7,), (18, 19, 20)),
+            ((2,),),
+            ((4,),),
+        )
+    )
+    received_requests: list[RollRequest] = []
+
+    def deterministic_roller(request: RollRequest) -> tuple[tuple[int, ...], ...]:
+        received_requests.append(request)
+        return next(generated)
+
+    window = MainWindow(repository, roller=deterministic_roller)
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.mouseClick(window.combined_roll_button, Qt.MouseButton.LeftButton)
+    dialog = window.findChild(CombinedRollDialog)
+    assert dialog is not None
+    dialog.set_title(combined_request().title)
+    for component in combined_request().components:
+        dialog.add_component(component)
+    qtbot.mouseClick(dialog.roll_button, Qt.MouseButton.LeftButton)
+
+    assert window.repeat_button.text() == "Repetir tirada combinada"
+    qtbot.mouseClick(window.repeat_button, Qt.MouseButton.LeftButton)
+
+    assert received_requests == [combined_request(), combined_request()]
+    assert not dialog.isVisible()
+    assert repository.recent(1)[0].result.components[2].values == (18, 19, 20)
+
+    window.die_buttons[6].click()
+    window.quantity_combo.setCurrentIndex(0)
+    window.roll_title_edit.setText("Ataque simple")
+    qtbot.mouseClick(window.roll_button, Qt.MouseButton.LeftButton)
+
+    simple = simple_request(1, 6, title="Ataque simple")
+    assert received_requests[-1] == simple
+    assert window.repeat_button.text() == "Repetir tirada"
+    qtbot.mouseClick(window.repeat_button, Qt.MouseButton.LeftButton)
+    assert received_requests[-2:] == [simple, simple]
+
+
+def test_combined_dialog_draft_survives_reopen_and_clear_keeps_last_repeat(
+    qtbot, repository: HistoryRepository
+) -> None:
+    """Catches recreating the builder or coupling its draft to repeat state."""
+    window = MainWindow(
+        repository,
+        roller=lambda request: tuple(
+            (1,) * component.count for component in request.components
+        ),
+    )
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.mouseClick(window.combined_roll_button, Qt.MouseButton.LeftButton)
+    dialog = window.findChild(CombinedRollDialog)
+    assert dialog is not None
+    dialog.set_title(combined_request().title)
+    for component in combined_request().components:
+        dialog.add_component(component)
+    dialog.reject()
+
+    qtbot.mouseClick(window.combined_roll_button, Qt.MouseButton.LeftButton)
+    assert window.findChild(CombinedRollDialog) is dialog
+    assert dialog.current_request() == combined_request()
+    qtbot.mouseClick(dialog.roll_button, Qt.MouseButton.LeftButton)
+    assert window.repeat_button.isEnabled()
+
+    qtbot.mouseClick(window.combined_roll_button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(dialog.clear_button, Qt.MouseButton.LeftButton)
+    assert dialog.current_request().components == ()
+    dialog.reject()
+
+    qtbot.mouseClick(window.repeat_button, Qt.MouseButton.LeftButton)
+    assert len(repository.recent()) == 2
+    assert repository.recent(1)[0].result.request == combined_request()
 
 
 def test_roll_renders_deterministic_results_and_saves_history(
