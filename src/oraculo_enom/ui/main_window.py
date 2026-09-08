@@ -30,6 +30,7 @@ from oraculo_enom.domain.dice import roll_values, validate_request
 from oraculo_enom.domain.models import (
     Comparator,
     RollComponentRequest,
+    RollRecord,
     RollRequest,
     RollResult,
 )
@@ -37,6 +38,8 @@ from oraculo_enom.persistence.history import HistoryRepository
 from oraculo_enom.services.clipboard import format_roll
 from oraculo_enom.ui.combined_dialog import CombinedRollDialog
 from oraculo_enom.ui.history_dialog import HistoryDialog
+from oraculo_enom.ui.history_errors import show_history_read_error
+from oraculo_enom.ui.integer_spin_box import ArbitraryIntegerSpinBox
 
 
 Roller = Callable[[RollRequest], tuple[tuple[int, ...], ...]]
@@ -57,6 +60,7 @@ class MainWindow(QMainWindow):
         self._selected_sides = 20
         self._last_request: RollRequest | None = None
         self._last_result: RollResult | None = None
+        self._last_record_id: int | None = None
         self._combined_dialog: CombinedRollDialog | None = None
         self._history_dialog: HistoryDialog | None = None
 
@@ -181,9 +185,8 @@ class MainWindow(QMainWindow):
         self.comparator_combo.setEnabled(False)
         options.addWidget(self.comparator_combo, 1, 1)
 
-        self.threshold_spin = QSpinBox()
+        self.threshold_spin = ArbitraryIntegerSpinBox()
         self.threshold_spin.setObjectName("thresholdSpin")
-        self.threshold_spin.setRange(-1_000_000, 1_000_000)
         self.threshold_spin.setValue(1)
         self.threshold_spin.setEnabled(False)
         options.addWidget(self.threshold_spin, 1, 2)
@@ -394,7 +397,7 @@ class MainWindow(QMainWindow):
             validate_request(request)
             values_by_component = self._roller(request)
             result = analyze(request, values_by_component)
-            self._repository.add(result)
+            record = self._repository.add(result)
         except (ValueError, OSError) as error:
             self.validation_label.setText(str(error))
             self.validation_label.show()
@@ -405,6 +408,7 @@ class MainWindow(QMainWindow):
         self.roll_title_edit.setText(request.title)
         self._last_request = request
         self._last_result = result
+        self._last_record_id = record.id
         self._render_result(result)
         self._refresh_recent_history()
         self.repeat_button.setText(
@@ -426,8 +430,8 @@ class MainWindow(QMainWindow):
     def _open_combined_roll(self) -> None:
         if self._combined_dialog is None:
             self._combined_dialog = CombinedRollDialog(self)
-            self._combined_dialog.set_title(self.roll_title_edit.text())
             self._combined_dialog.roll_requested.connect(self._execute_request)
+        self._combined_dialog.set_title(self.roll_title_edit.text())
         self._combined_dialog.show()
         self._combined_dialog.raise_()
         self._combined_dialog.activateWindow()
@@ -436,6 +440,9 @@ class MainWindow(QMainWindow):
         if self._history_dialog is None:
             self._history_dialog = HistoryDialog(self._repository, self)
             self._history_dialog.repeat_requested.connect(self._repeat_from_history)
+            self._history_dialog.record_updated.connect(
+                self._history_record_updated
+            )
             self._history_dialog.history_changed.connect(
                 self._refresh_recent_history
             )
@@ -450,6 +457,12 @@ class MainWindow(QMainWindow):
         if self._history_dialog is not None:
             self._history_dialog.close()
         self._repeat_request(request)
+
+    def _history_record_updated(self, record: RollRecord) -> None:
+        if record.id != self._last_record_id:
+            return
+        self._last_request = record.result.request
+        self._last_result = record.result
 
     def _copy_last_roll(self) -> None:
         if self._last_result is None:
@@ -532,8 +545,12 @@ class MainWindow(QMainWindow):
         )
 
     def _refresh_recent_history(self) -> None:
+        try:
+            records = self._repository.recent(5)
+        except OSError as error:
+            show_history_read_error(self, error)
+            return
         self._clear_layout(self.recent_history_layout)
-        records = self._repository.recent(5)
         if not records:
             empty_label = QLabel("Todavía no hay tiradas.")
             empty_label.setObjectName("emptyHistoryLabel")

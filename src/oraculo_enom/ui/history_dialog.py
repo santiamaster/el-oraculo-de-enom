@@ -26,12 +26,14 @@ from PySide6.QtWidgets import (
 from oraculo_enom.domain.models import MAX_TITLE_LENGTH, RollRecord, RollRequest
 from oraculo_enom.persistence.history import HistoryRepository
 from oraculo_enom.services.clipboard import format_roll
+from oraculo_enom.ui.history_errors import show_history_read_error
 
 
 class HistoryDialog(QDialog):
     """Browse, filter, copy, repeat, and delete saved rolls."""
 
     repeat_requested = Signal(RollRequest)
+    record_updated = Signal(RollRecord)
     history_changed = Signal()
 
     def __init__(self, repository: HistoryRepository, parent=None) -> None:
@@ -161,16 +163,8 @@ class HistoryDialog(QDialog):
 
         self._set_selection_actions_enabled(False)
 
-    def _populate_sides_filter(self) -> None:
+    def _populate_sides_filter(self, sides: list[int]) -> None:
         selected_sides = self.sides_filter.currentData()
-        records = self._repository.search()
-        sides = sorted(
-            {
-                component.sides
-                for record in records
-                for component in record.result.request.components
-            }
-        )
         with QSignalBlocker(self.sides_filter):
             self.sides_filter.clear()
             self.sides_filter.addItem("Todos", None)
@@ -181,16 +175,31 @@ class HistoryDialog(QDialog):
 
     def refresh(self) -> None:
         """Reload records using the currently enabled filters."""
-        self._populate_sides_filter()
-        sides = self.sides_filter.currentData()
-        records = self._repository.search(
-            sides=int(sides) if sides is not None else None,
-            date_from=self._selected_date(
-                self.start_date_check, self.start_date_edit
-            ),
-            date_to=self._selected_date(self.end_date_check, self.end_date_edit),
-            title=self.title_search.text() or None,
-        )
+        try:
+            all_records = self._repository.search()
+            available_sides = sorted(
+                {
+                    component.sides
+                    for record in all_records
+                    for component in record.result.request.components
+                }
+            )
+            sides = self.sides_filter.currentData()
+            records = self._repository.search(
+                sides=sides if sides in available_sides else None,
+                date_from=self._selected_date(
+                    self.start_date_check, self.start_date_edit
+                ),
+                date_to=self._selected_date(
+                    self.end_date_check, self.end_date_edit
+                ),
+                title=self.title_search.text() or None,
+            )
+        except OSError as error:
+            show_history_read_error(self, error)
+            return
+
+        self._populate_sides_filter(available_sides)
         self._records_by_id = {record.id: record for record in records}
 
         with QSignalBlocker(self.records_table):
@@ -325,6 +334,7 @@ class HistoryDialog(QDialog):
 
         self.refresh()
         self._select_record(updated.id)
+        self.record_updated.emit(updated)
         self.history_changed.emit()
 
     def _select_record(self, record_id: int) -> None:

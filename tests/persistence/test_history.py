@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from datetime import date, datetime
+import json
 from pathlib import Path
 import sqlite3
 
@@ -107,6 +108,150 @@ def test_add_round_trips_a_combined_roll_and_ordered_components(
     assert round_tripped.result == result
     assert round_tripped.result.components[0].matches == (6,)
     assert round_tripped.result.components[1].matches == (15, 19)
+
+
+def test_arbitrary_thresholds_and_legacy_integer_records_reopen_exactly(tmp_path):
+    """Catches precision loss, incompatible v1 arrays, or schema version drift."""
+    database = tmp_path / "thresholds.db"
+    thresholds = [None, 0, -(2**63), 2**63 - 1, -(2**63) - 1, 2**63, 10**50, -(10**50)]
+    history = HistoryRepository(database)
+    expected = {}
+    try:
+        for threshold in thresholds:
+            result = make_simple_result(
+                threshold=threshold,
+                comparator=Comparator.GREATER_THAN if threshold is not None else None,
+            )
+            expected[history.add(result).id] = threshold
+        rows = history._connection.execute(
+            "SELECT threshold, values_json FROM roll_components ORDER BY roll_id"
+        ).fetchall()
+        assert [row["threshold"] for row in rows[:4]] == thresholds[:4]
+        assert all(json.loads(row["values_json"]) == [7, 18, 20] for row in rows)
+        assert history._connection.execute("PRAGMA user_version").fetchone()[0] == 1
+    finally:
+        history.close()
+    reopened = HistoryRepository(database)
+    try:
+        for record in reopened.recent(20):
+            assert record.result.request.components[0].threshold == expected.pop(record.id)
+        assert not expected
+    finally:
+        reopened.close()
+
+
+def test_threshold_beyond_python_decimal_limit_round_trips_exactly(repository):
+    """Catches Python's digit guard imposing an undeclared domain limit."""
+    threshold = 10**5000
+    record = repository.add(
+        make_simple_result(
+            threshold=threshold,
+            comparator=Comparator.GREATER_THAN,
+        )
+    )
+    stored = repository._connection.execute(
+        "SELECT threshold FROM roll_components WHERE roll_id = ?", (record.id,)
+    ).fetchone()
+
+    assert stored["threshold"] == "int:1" + "0" * 5000
+    assert repository.recent(1)[0].id == record.id
+    assert (
+        repository.recent(1)[0].result.request.components[0].threshold
+        == threshold
+    )
+
+
+@pytest.mark.parametrize("threshold", [
+    "int:9223372036854775808", "int:-9223372036854775809", "int:" + "9" * 50,
+])
+def test_sqlite_accepts_canonical_marked_arbitrary_threshold(repository, threshold):
+    record = repository.add(make_simple_result())
+    repository._connection.execute(
+        "UPDATE roll_components SET threshold = ? WHERE roll_id = ?", (threshold, record.id)
+    )
+    repository._connection.commit()
+    assert repository.recent()[0].result.request.components[0].threshold == int(threshold[4:])
+
+
+@pytest.mark.parametrize("threshold", [
+    "int:1", "int:0", "int:-0", "int:+9223372036854775808",
+    "int:09223372036854775808", "int:-09223372036854775809", "int:",
+    "int:9223372036854775808.0", "int:9223372036854775808x", "int:1e50",
+    "int:9223372036854775808\n", "int:9223372036854775808\x00",
+])
+def test_sqlite_rejects_noncanonical_marked_threshold(repository, threshold):
+    repository.add(make_simple_result())
+    with pytest.raises(sqlite3.IntegrityError):
+        repository._connection.execute("UPDATE roll_components SET threshold = ?", (threshold,))
+    repository._connection.rollback()
+    assert repository.recent()[0].result.request.components[0].threshold == 12
+
+
+@pytest.mark.parametrize("query", ["recent", "search"])
+@pytest.mark.parametrize("payload", [
+    "[99]", "[99, 6]", "[0, 6]", "[4]", "[4, 6, 1]", "[true, 6]",
+    "[4.0, 6]", '["4", 6]', "[null, 6]", '[[4], 6]',
+    '{"4": 6}', '"46"', "null", "4", "[4,", "[NaN, 6]",
+])
+def test_corrupt_values_are_controlled_and_never_mutate_storage(repository, payload, query):
+    """Catches malformed JSON, noninteger values, or count/range mismatch hydration."""
+    record = repository.add(make_combined_result())
+    repository._connection.execute(
+        "UPDATE roll_components SET values_json = ? WHERE roll_id = ? AND position = 0",
+        (payload, record.id),
+    )
+    repository._connection.commit()
+    before = tuple(repository._connection.iterdump())
+
+    with pytest.raises(OSError, match="datos inconsistentes.*copia"):
+        getattr(repository, query)()
+
+    assert tuple(repository._connection.iterdump()) == before
+
+
+@pytest.mark.parametrize("statement", [
+    "UPDATE roll_components SET subtotal = 999 WHERE position = 0",
+    "UPDATE rolls SET total = 999",
+    "UPDATE roll_components SET position = 4 WHERE position = 1",
+    "DELETE FROM roll_components",
+    "UPDATE rolls SET created_at = 'ayer'",
+    "UPDATE rolls SET created_at = '2026-09-05'",
+    "UPDATE roll_components SET threshold = 'int:01' WHERE position = 0",
+    "UPDATE roll_components SET threshold = 'int:12' WHERE position = 0",
+    "UPDATE roll_components SET threshold = 1.5 WHERE position = 0",
+    "UPDATE roll_components SET comparator = '!=' WHERE position = 0",
+    "UPDATE roll_components SET comparator = NULL WHERE position = 0",
+    "UPDATE rolls SET show_sum = 7",
+    "UPDATE rolls SET show_sum = 0, total = NULL",
+    "UPDATE roll_components SET subtotal = NULL WHERE position = 0",
+    "UPDATE roll_components SET count = 1.5 WHERE position = 0",
+    "UPDATE roll_components SET count = 999, values_json = '[' || rtrim(replace(hex(zeroblob(999)), '00', '1,'), ',') || ']' WHERE position = 0",
+])
+def test_corrupt_aggregate_is_controlled_and_never_mutates_storage(repository, statement):
+    """Catches missing groups, invalid requests, malformed thresholds and inconsistent sums."""
+    repository.add(make_combined_result())
+    connection = repository._connection
+    connection.execute("PRAGMA ignore_check_constraints = ON")
+    connection.execute("DROP TRIGGER validate_component_subtotal_update")
+    connection.execute("DROP TRIGGER validate_roll_sum_update")
+    connection.execute(statement)
+    connection.commit()
+    before = tuple(connection.iterdump())
+
+    with pytest.raises(OSError, match="datos inconsistentes.*copia"):
+        repository.recent()
+
+    assert tuple(connection.iterdump()) == before
+
+
+def test_retitle_of_corrupt_record_rolls_back_instead_of_committing(repository):
+    record = repository.add(make_combined_result())
+    repository._connection.execute("UPDATE roll_components SET values_json = '[99]'")
+    repository._connection.commit()
+    before = tuple(repository._connection.iterdump())
+    with pytest.raises(OSError, match="datos inconsistentes.*copia"):
+        repository.update_title(record.id, "No guardar")
+    assert tuple(repository._connection.iterdump()) == before
 
 
 def test_add_round_trips_nullable_sums_for_a_simple_roll(

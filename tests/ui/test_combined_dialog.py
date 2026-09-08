@@ -218,6 +218,23 @@ def test_component_threshold_round_trips_beyond_qspinbox_range(qtbot) -> None:
     )
 
 
+def test_component_threshold_round_trips_beyond_python_decimal_limit(qtbot) -> None:
+    """Catches the runtime digit guard becoming an undeclared editor limit."""
+    threshold = -(10**5000)
+    dialog = CombinedRollDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.add_component(
+        RollComponentRequest(1, 6, Comparator.GREATER_THAN, threshold)
+    )
+
+    threshold_editor = row_control(dialog, 6, "ThresholdSpin")
+    assert threshold_editor.lineEdit().text() == "-1" + "0" * 5000
+    assert dialog.current_request().components == (
+        RollComponentRequest(1, 6, Comparator.GREATER_THAN, threshold),
+    )
+
+
 def test_arbitrary_threshold_editor_keeps_spinbox_ergonomics(qtbot) -> None:
     """Catches the unbounded editor losing the themed spin-box dimensions."""
     app = QApplication.instance()

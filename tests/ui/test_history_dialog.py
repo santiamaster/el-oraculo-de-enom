@@ -34,6 +34,74 @@ def repository(tmp_path: Path) -> Iterator[HistoryRepository]:
     history.close()
 
 
+@pytest.mark.parametrize("failed_query", [1, 2])
+def test_failed_history_refresh_preserves_rows_selection_detail_and_filters(
+    qtbot, repository, monkeypatch, failed_query
+):
+    """Catches a read exception escaping or partial UI swaps before all reads succeed."""
+    seed_three(repository)
+    dialog = HistoryDialog(repository)
+    qtbot.addWidget(dialog)
+    dialog.records_table.selectRow(1)
+    selected = dialog.selected_record_id
+    detail = dialog.detail_view.toPlainText()
+    items = [dialog.records_table.item(row, 1) for row in range(3)]
+    filter_items = [dialog.sides_filter.itemText(i) for i in range(dialog.sides_filter.count())]
+    before = tuple(repository._connection.iterdump())
+    original_search = repository.search
+    calls = 0
+    messages = []
+
+    def fail_at_read_boundary(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == failed_query:
+            raise OSError("Lectura interrumpida")
+        # A successful first read may discover a changed catalog, but must not
+        # publish that change before the second (filtered) read succeeds.
+        return []
+
+    monkeypatch.setattr(repository, "search", fail_at_read_boundary)
+    monkeypatch.setattr(QMessageBox, "critical", lambda parent, title, text: messages.append(text))
+    dialog.refresh()
+
+    assert dialog.selected_record_id == selected
+    assert dialog.detail_view.toPlainText() == detail
+    assert [dialog.records_table.item(row, 1) for row in range(3)] == items
+    assert [dialog.sides_filter.itemText(i) for i in range(dialog.sides_filter.count())] == filter_items
+    assert dialog.copy_button.isEnabled() and dialog.repeat_button.isEnabled()
+    assert len(messages) == 1
+    assert "Lectura interrumpida" in messages[0] and "Volvé a intentar" in messages[0]
+    assert tuple(repository._connection.iterdump()) == before
+    monkeypatch.setattr(repository, "search", original_search)
+    dialog.refresh()
+    assert dialog.records_table.rowCount() == 3
+
+
+def test_failed_full_history_open_is_contained_and_can_be_retried(qtbot, repository, monkeypatch):
+    seed_three(repository)
+    window = MainWindow(repository)
+    qtbot.addWidget(window)
+    original_search = repository.search
+    before = tuple(repository._connection.iterdump())
+    messages = []
+
+    def fail_to_read(*args, **kwargs):
+        raise OSError("Lectura interrumpida")
+
+    monkeypatch.setattr(repository, "search", fail_to_read)
+    monkeypatch.setattr(QMessageBox, "critical", lambda parent, title, text: messages.append(text))
+    window._open_full_history()
+    dialog = window.findChild(HistoryDialog)
+    assert dialog.isVisible()
+    assert dialog.records_table.rowCount() == 0
+    assert "Volvé a intentar" in messages[0]
+    assert tuple(repository._connection.iterdump()) == before
+    monkeypatch.setattr(repository, "search", original_search)
+    window._open_full_history()
+    assert dialog.records_table.rowCount() == 3
+
+
 def add_roll(
     repository: HistoryRepository,
     *,

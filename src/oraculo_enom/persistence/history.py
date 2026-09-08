@@ -7,12 +7,12 @@ from pathlib import Path
 import sqlite3
 from typing import TypeVar
 
-from oraculo_enom.domain.analysis import OPERATIONS
+from oraculo_enom.domain.analysis import analyze
+from oraculo_enom.domain.dice import validate_request
 from oraculo_enom.domain.models import (
     Comparator,
     MAX_TITLE_LENGTH,
     RollComponentRequest,
-    RollComponentResult,
     RollRecord,
     RollRequest,
     RollResult,
@@ -20,9 +20,24 @@ from oraculo_enom.domain.models import (
 from oraculo_enom.services.paths import HISTORY_STORAGE_ERROR, database_path
 
 from .database import connect
+from .thresholds import decode_threshold, encode_threshold
 
 
 T = TypeVar("T")
+
+HISTORY_CORRUPTION_ERROR = (
+    "El historial contiene datos inconsistentes. Cerrá la aplicación y conservá "
+    "una copia de datos/historial.db antes de pedir ayuda."
+)
+
+
+class _CorruptHistoryError(ValueError):
+    """Stored rows cannot be reconstructed as a valid immutable result."""
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"invalid JSON constant: {value}")
+
 
 _JOINED_COLUMNS = """
     rolls.id AS roll_id,
@@ -93,7 +108,7 @@ class HistoryRepository:
                         component.comparator.value
                         if component.comparator is not None
                         else None,
-                        component.threshold,
+                        encode_threshold(component.threshold),
                     ),
                 )
 
@@ -240,6 +255,9 @@ class HistoryRepository:
         except sqlite3.Error as error:
             self._rollback_quietly()
             raise OSError(HISTORY_STORAGE_ERROR) from error
+        except _CorruptHistoryError as error:
+            self._rollback_quietly()
+            raise OSError(HISTORY_CORRUPTION_ERROR) from error
         except Exception:
             self._rollback_quietly()
             raise
@@ -249,6 +267,8 @@ class HistoryRepository:
             return operation()
         except sqlite3.Error as error:
             raise OSError(HISTORY_STORAGE_ERROR) from error
+        except _CorruptHistoryError as error:
+            raise OSError(HISTORY_CORRUPTION_ERROR) from error
 
     def _rollback_quietly(self) -> None:
         try:
@@ -281,53 +301,95 @@ class HistoryRepository:
 
     @staticmethod
     def _record_from_rows(rows: list[sqlite3.Row]) -> RollRecord:
+        try:
+            return HistoryRepository._hydrate_record(rows)
+        except _CorruptHistoryError:
+            raise
+        except (KeyError, TypeError, ValueError) as error:
+            raise _CorruptHistoryError("invalid stored roll") from error
+
+    @staticmethod
+    def _hydrate_record(rows: list[sqlite3.Row]) -> RollRecord:
         header = rows[0]
+        record_id = header["roll_id"]
+        if type(record_id) is not int:
+            raise _CorruptHistoryError("invalid roll identifier")
+
+        created_at_value = header["created_at"]
+        if type(created_at_value) is not str:
+            raise _CorruptHistoryError("invalid creation date")
+        created_at = datetime.fromisoformat(created_at_value)
+        if created_at.isoformat() != created_at_value:
+            raise _CorruptHistoryError("creation date is not canonical")
+
+        title = header["title"]
+        show_sum_value = header["show_sum"]
+        total = header["total"]
+        if type(title) is not str:
+            raise _CorruptHistoryError("invalid title")
+        if type(show_sum_value) is not int or show_sum_value not in (0, 1):
+            raise _CorruptHistoryError("invalid show_sum flag")
+        if total is not None and type(total) is not int:
+            raise _CorruptHistoryError("invalid total")
+
         component_requests: list[RollComponentRequest] = []
-        component_results: list[RollComponentResult] = []
-        for component_row in rows:
+        stored_values: list[tuple[int, ...]] = []
+        stored_subtotals: list[int | None] = []
+        for expected_position, component_row in enumerate(rows):
             if component_row["component_id"] is None:
-                raise sqlite3.DatabaseError(
-                    f"Roll {header['roll_id']} has no stored components"
-                )
+                raise _CorruptHistoryError("roll has no stored components")
+            if component_row["roll_id"] != record_id:
+                raise _CorruptHistoryError("mixed roll identifiers")
+            if component_row["position"] != expected_position:
+                raise _CorruptHistoryError("invalid component positions")
+
+            count = component_row["count"]
+            sides = component_row["sides"]
+            subtotal = component_row["subtotal"]
+            if type(count) is not int or type(sides) is not int:
+                raise _CorruptHistoryError("invalid component request")
+            if subtotal is not None and type(subtotal) is not int:
+                raise _CorruptHistoryError("invalid subtotal")
+
             comparator = (
                 Comparator(component_row["comparator"])
                 if component_row["comparator"] is not None
                 else None
             )
             component_request = RollComponentRequest(
-                count=component_row["count"],
-                sides=component_row["sides"],
+                count=count,
+                sides=sides,
                 comparator=comparator,
-                threshold=component_row["threshold"],
+                threshold=decode_threshold(component_row["threshold"]),
             )
-            values = tuple(json.loads(component_row["values_json"]))
-            matches: tuple[int, ...] = ()
-            if comparator is not None and component_request.threshold is not None:
-                operation = OPERATIONS[comparator]
-                matches = tuple(
-                    value
-                    for value in values
-                    if operation(value, component_request.threshold)
-                )
+
+            values_json = component_row["values_json"]
+            if type(values_json) is not str:
+                raise _CorruptHistoryError("invalid values payload")
+            decoded_values = json.loads(
+                values_json,
+                parse_constant=_reject_json_constant,
+            )
+            if not isinstance(decoded_values, list) or any(
+                type(value) is not int for value in decoded_values
+            ):
+                raise _CorruptHistoryError("values must be an integer array")
+
             component_requests.append(component_request)
-            component_results.append(
-                RollComponentResult(
-                    request=component_request,
-                    values=values,
-                    subtotal=component_row["subtotal"],
-                    matches=matches,
-                )
-            )
+            stored_values.append(tuple(decoded_values))
+            stored_subtotals.append(subtotal)
 
         request = RollRequest(
             components=tuple(component_requests),
-            show_sum=bool(header["show_sum"]),
-            title=header["title"],
+            show_sum=bool(show_sum_value),
+            title=title,
         )
-        result = RollResult(
-            request=request,
-            components=tuple(component_results),
-            total=header["total"],
-            created_at=datetime.fromisoformat(header["created_at"]),
-        )
-        return RollRecord(id=header["roll_id"], result=result)
+        if request.title != title:
+            raise _CorruptHistoryError("stored title is not normalized")
+        validate_request(request)
+        result = analyze(request, tuple(stored_values), created_at=created_at)
+        if [component.subtotal for component in result.components] != stored_subtotals:
+            raise _CorruptHistoryError("stored subtotals are inconsistent")
+        if result.total != total:
+            raise _CorruptHistoryError("stored total is inconsistent")
+        return RollRecord(id=record_id, result=result)

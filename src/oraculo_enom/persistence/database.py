@@ -45,6 +45,32 @@ _SCHEMA_STATEMENTS = (
         ),
         threshold INTEGER CHECK (
             threshold IS NULL OR typeof(threshold) = 'integer'
+            OR (
+                typeof(threshold) = 'text'
+                AND instr(threshold, char(0)) = 0
+                AND (
+                    (
+                        substr(threshold, 1, 4) = 'int:'
+                        AND substr(threshold, 5, 1) GLOB '[1-9]'
+                        AND substr(threshold, 5) NOT GLOB '*[^0-9]*'
+                        AND (
+                            length(substr(threshold, 5)) > 19
+                            OR (length(substr(threshold, 5)) = 19
+                                AND substr(threshold, 5) > '9223372036854775807')
+                        )
+                    )
+                    OR (
+                        substr(threshold, 1, 5) = 'int:-'
+                        AND substr(threshold, 6, 1) GLOB '[1-9]'
+                        AND substr(threshold, 6) NOT GLOB '*[^0-9]*'
+                        AND (
+                            length(substr(threshold, 6)) > 19
+                            OR (length(substr(threshold, 6)) = 19
+                                AND substr(threshold, 6) > '9223372036854775808')
+                        )
+                    )
+                )
+            )
         ),
         FOREIGN KEY (roll_id) REFERENCES rolls (id) ON DELETE CASCADE,
         UNIQUE (roll_id, position),

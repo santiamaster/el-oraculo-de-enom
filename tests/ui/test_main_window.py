@@ -3,11 +3,18 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QInputDialog,
+    QLabel,
+    QMessageBox,
+)
 
 from oraculo_enom.domain.models import Comparator, RollComponentRequest, RollRequest
 from oraculo_enom.persistence.history import HistoryRepository
 from oraculo_enom.ui.combined_dialog import CombinedRollDialog
+from oraculo_enom.ui.history_dialog import HistoryDialog
 from oraculo_enom.ui.main_window import MainWindow
 from oraculo_enom.ui.theme import STYLESHEET
 
@@ -34,6 +41,25 @@ def simple_request(
     )
 
 
+@pytest.mark.parametrize("threshold", [1_000_001, -1_000_001, 10**10, -(10**10)])
+def test_simple_restore_repeat_and_next_roll_preserve_exact_threshold(
+    qtbot, repository: HistoryRepository, threshold: int
+) -> None:
+    """Catches Qt clipping or overflowing a valid saved one-component filter."""
+    request = simple_request(1, 6, True, Comparator.GREATER_THAN, threshold)
+    window = MainWindow(repository, roller=lambda request: ((4,),))
+    qtbot.addWidget(window)
+    window._execute_request(request)
+
+    window._repeat_last_roll()
+    assert window.threshold_spin.value() == threshold
+    window._roll()
+
+    records = repository.recent()
+    assert len(records) == 3
+    assert all(record.result.request == request for record in records)
+
+
 def combined_request(*, show_sum: bool = True) -> RollRequest:
     return RollRequest(
         (
@@ -44,6 +70,53 @@ def combined_request(*, show_sum: bool = True) -> RollRequest:
         show_sum=show_sum,
         title="Ataque combinado de Arhat",
     )
+
+
+def test_recent_read_failure_preserves_visible_roll_and_history(qtbot, repository, monkeypatch):
+    """Catches deleting recent entries before the repository read succeeds."""
+    window = MainWindow(repository, roller=lambda request: ((4,),))
+    qtbot.addWidget(window)
+    window._roll()
+    entries = window.recent_history_widget.findChildren(QLabel, "historyEntry")
+    badges = window.results_widget.findChildren(QLabel, "resultBadge")
+    before = tuple(repository._connection.iterdump())
+    messages = []
+
+    def fail_to_read(*args, **kwargs):
+        raise OSError("Lectura interrumpida")
+
+    monkeypatch.setattr(repository, "recent", fail_to_read)
+    monkeypatch.setattr(QMessageBox, "critical", lambda parent, title, text: messages.append(text))
+    window._refresh_recent_history()
+
+    assert window.recent_history_widget.findChildren(QLabel, "historyEntry") == entries
+    assert window.results_widget.findChildren(QLabel, "resultBadge") == badges
+    assert window.copy_button.isEnabled() and window.repeat_button.isEnabled()
+    assert len(messages) == 1
+    assert "Lectura interrumpida" in messages[0] and "Volvé a intentar" in messages[0]
+    assert tuple(repository._connection.iterdump()) == before
+
+
+@pytest.mark.parametrize("threshold", [10**50, -(10**50)])
+def test_combined_builder_executes_saves_and_reads_arbitrary_threshold(
+    qtbot, repository: HistoryRepository, threshold: int
+) -> None:
+    """Catches binding an arbitrary builder threshold to SQLite's int64 slot."""
+    window = MainWindow(repository, roller=lambda request: ((4,), (7,)))
+    qtbot.addWidget(window)
+    window._open_combined_roll()
+    dialog = window.findChild(CombinedRollDialog)
+    dialog.add_component(RollComponentRequest(1, 6, Comparator.GREATER_THAN, threshold))
+    dialog.add_component(RollComponentRequest(1, 8))
+
+    dialog._submit()
+
+    [stored] = repository.recent()
+    assert stored.result.request.components[0].threshold == threshold
+    assert stored.result.components[0].values == (4,)
+    assert stored.result.components[1].values == (7,)
+    assert stored.result.total == 11
+    assert not dialog.isVisible()
 
 
 def test_custom_quantity_is_explicit_enabled_only_when_selected_and_restored(
@@ -325,10 +398,10 @@ def test_combined_dialog_draft_survives_reopen_and_clear_keeps_last_repeat(
     )
     qtbot.addWidget(window)
     window.show()
+    window.roll_title_edit.setText(combined_request().title)
     qtbot.mouseClick(window.combined_roll_button, Qt.MouseButton.LeftButton)
     dialog = window.findChild(CombinedRollDialog)
     assert dialog is not None
-    dialog.set_title(combined_request().title)
     for component in combined_request().components:
         dialog.add_component(component)
     dialog.reject()
@@ -347,6 +420,98 @@ def test_combined_dialog_draft_survives_reopen_and_clear_keeps_last_repeat(
     qtbot.mouseClick(window.repeat_button, Qt.MouseButton.LeftButton)
     assert len(repository.recent()) == 2
     assert repository.recent(1)[0].result.request == combined_request()
+
+
+def test_reopening_combined_builder_syncs_main_title_and_preserves_components(
+    qtbot, repository: HistoryRepository
+) -> None:
+    """Catches a reopened builder submitting its stale title or losing its draft."""
+    window = MainWindow(
+        repository,
+        roller=lambda request: tuple(
+            (1,) * component.count for component in request.components
+        ),
+    )
+    qtbot.addWidget(window)
+    window.roll_title_edit.setText("Título inicial")
+    window._open_combined_roll()
+    dialog = window.findChild(CombinedRollDialog)
+    assert dialog is not None
+    dialog.add_component(RollComponentRequest(2, 6))
+    dialog.add_component(RollComponentRequest(1, 8))
+    dialog.reject()
+
+    window.roll_title_edit.setText("Título vigente")
+    window._open_combined_roll()
+
+    assert dialog.current_request() == RollRequest(
+        (RollComponentRequest(2, 6), RollComponentRequest(1, 8)),
+        show_sum=True,
+        title="Título vigente",
+    )
+    qtbot.mouseClick(dialog.roll_button, Qt.MouseButton.LeftButton)
+    assert repository.recent(1)[0].result.request.title == "Título vigente"
+
+
+def test_retitle_of_active_last_roll_updates_main_copy_and_repeat(
+    qtbot, repository: HistoryRepository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches main copy/repeat retaining the title saved before a history edit."""
+    window = MainWindow(repository, roller=lambda request: ((3, 4),))
+    qtbot.addWidget(window)
+    window.die_buttons[6].click()
+    window.quantity_combo.setCurrentIndex(1)
+    window.roll_title_edit.setText("Título original")
+    qtbot.mouseClick(window.roll_button, Qt.MouseButton.LeftButton)
+    window._open_full_history()
+    dialog = window.findChild(HistoryDialog)
+    assert dialog is not None
+    dialog.records_table.selectRow(0)
+
+    def accept_edited(input_dialog: QInputDialog) -> int:
+        input_dialog.setTextValue("Título corregido")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QInputDialog, "exec", accept_edited)
+    qtbot.mouseClick(dialog.edit_title_button, Qt.MouseButton.LeftButton)
+
+    clipboard = QApplication.clipboard()
+    clipboard.clear()
+    qtbot.mouseClick(window.copy_button, Qt.MouseButton.LeftButton)
+    assert clipboard.text().startswith("Título corregido\n2d6: 3, 4")
+
+    qtbot.mouseClick(window.repeat_button, Qt.MouseButton.LeftButton)
+    assert repository.recent(1)[0].result.request.title == "Título corregido"
+
+
+def test_retitle_of_older_roll_does_not_replace_active_main_copy_state(
+    qtbot, repository: HistoryRepository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches an unrelated history edit replacing the active last-roll identity."""
+    window = MainWindow(repository, roller=lambda request: ((3, 4),))
+    qtbot.addWidget(window)
+    window.die_buttons[6].click()
+    window.quantity_combo.setCurrentIndex(1)
+    window.roll_title_edit.setText("Tirada anterior")
+    qtbot.mouseClick(window.roll_button, Qt.MouseButton.LeftButton)
+    window.roll_title_edit.setText("Tirada activa")
+    qtbot.mouseClick(window.roll_button, Qt.MouseButton.LeftButton)
+    window._open_full_history()
+    dialog = window.findChild(HistoryDialog)
+    assert dialog is not None
+    dialog.records_table.selectRow(1)
+
+    def accept_edited(input_dialog: QInputDialog) -> int:
+        input_dialog.setTextValue("Anterior corregida")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QInputDialog, "exec", accept_edited)
+    qtbot.mouseClick(dialog.edit_title_button, Qt.MouseButton.LeftButton)
+
+    clipboard = QApplication.clipboard()
+    clipboard.clear()
+    qtbot.mouseClick(window.copy_button, Qt.MouseButton.LeftButton)
+    assert clipboard.text().startswith("Tirada activa\n2d6: 3, 4")
 
 
 def test_roll_renders_deterministic_results_and_saves_history(
