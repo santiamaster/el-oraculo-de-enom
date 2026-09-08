@@ -9,6 +9,7 @@ from oraculo_enom.domain.models import Comparator, RollComponentRequest, RollReq
 from oraculo_enom.persistence.history import HistoryRepository
 from oraculo_enom.ui.combined_dialog import CombinedRollDialog
 from oraculo_enom.ui.main_window import MainWindow
+from oraculo_enom.ui.theme import STYLESHEET
 
 
 @pytest.fixture
@@ -200,6 +201,36 @@ def test_combined_builder_executes_once_and_renders_every_ordered_group(
     ]
     assert window.sum_label.text() == "Suma total: 54"
     assert window.roll_title_edit.text() == "Ataque combinado de Arhat"
+
+
+def test_combined_result_badges_keep_readable_height_and_scroll_when_needed(
+    qtbot, repository: HistoryRepository
+) -> None:
+    """Catches the resizable scroll area vertically compressing result badges."""
+    app = QApplication.instance()
+    assert app is not None
+    previous_stylesheet = app.styleSheet()
+    app.setStyleSheet(STYLESHEET)
+    try:
+        window = MainWindow(
+            repository,
+            roller=lambda request: ((4, 6), (7,), (3, 15, 19)),
+        )
+        qtbot.addWidget(window)
+        window.resize(1180, 760)
+        window.show()
+
+        window._execute_request(combined_request())
+        app.processEvents()
+
+        badges = window.results_widget.findChildren(QLabel, "resultBadge")
+        assert len(badges) == 6
+        assert all(
+            badge.height() >= badge.sizeHint().height() for badge in badges
+        )
+        assert window.results_scroll.verticalScrollBar().maximum() > 0
+    finally:
+        app.setStyleSheet(previous_stylesheet)
 
 
 def test_combined_repeat_is_immediate_then_simple_roll_replaces_repeat_context(

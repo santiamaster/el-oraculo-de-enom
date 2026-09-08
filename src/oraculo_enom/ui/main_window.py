@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QLineEdit,
     QMainWindow,
     QPushButton,
@@ -220,6 +221,9 @@ class MainWindow(QMainWindow):
         self.results_widget = QWidget()
         self.results_widget.setObjectName("resultsWidget")
         self.results_layout = QGridLayout(self.results_widget)
+        self.results_layout.setSizeConstraint(
+            QLayout.SizeConstraint.SetMinAndMaxSize
+        )
         self.results_layout.setAlignment(
             Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
         )
