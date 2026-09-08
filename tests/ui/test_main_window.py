@@ -233,6 +233,38 @@ def test_combined_result_badges_keep_readable_height_and_scroll_when_needed(
         app.setStyleSheet(previous_stylesheet)
 
 
+def test_combined_builder_without_sum_persists_and_renders_no_totals(
+    qtbot, repository: HistoryRepository
+) -> None:
+    """Catches the combined execution path ignoring disabled sum output."""
+    window = MainWindow(
+        repository,
+        roller=lambda request: ((4, 6), (7,), (3, 15, 19)),
+    )
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.mouseClick(window.combined_roll_button, Qt.MouseButton.LeftButton)
+    dialog = window.findChild(CombinedRollDialog)
+    assert dialog is not None
+    dialog.set_title(combined_request(show_sum=False).title)
+    dialog.show_sum_check.setChecked(False)
+    for component in combined_request(show_sum=False).components:
+        dialog.add_component(component)
+
+    qtbot.mouseClick(dialog.roll_button, Qt.MouseButton.LeftButton)
+
+    [stored] = repository.recent()
+    assert stored.result.request == combined_request(show_sum=False)
+    assert stored.result.total is None
+    assert all(
+        component.subtotal is None for component in stored.result.components
+    )
+    assert window.results_widget.findChildren(
+        QLabel, "componentSubtotalLabel"
+    ) == []
+    assert not window.sum_label.isVisible()
+
+
 def test_combined_repeat_is_immediate_then_simple_roll_replaces_repeat_context(
     qtbot, repository: HistoryRepository
 ) -> None:

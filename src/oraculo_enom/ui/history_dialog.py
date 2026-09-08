@@ -224,6 +224,7 @@ class HistoryDialog(QDialog):
                         str(result.total) if result.total is not None else ""
                     ),
                 )
+            self.records_table.resizeRowsToContents()
             self.records_table.clearSelection()
             self.records_table.setCurrentItem(None)
 

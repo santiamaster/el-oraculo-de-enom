@@ -24,6 +24,7 @@ from oraculo_enom.persistence.history import HistoryRepository
 from oraculo_enom.services.paths import HISTORY_STORAGE_ERROR
 from oraculo_enom.ui.history_dialog import HistoryDialog
 from oraculo_enom.ui.main_window import MainWindow
+from oraculo_enom.ui.theme import STYLESHEET
 
 
 @pytest.fixture
@@ -176,6 +177,31 @@ def test_combined_history_shows_title_notation_and_all_component_details(
     assert dialog.selected_record_id == combined.id
     assert dialog.detail_view.toPlainText() == expected_detail
     assert clipboard.text() == expected_detail.split("\n", 1)[1]
+
+
+def test_titled_history_row_is_tall_enough_for_title_and_notation(
+    qtbot, repository: HistoryRepository
+) -> None:
+    """Catches the fixed table row height clipping canonical notation."""
+    add_combined_roll(repository)
+    app = QApplication.instance()
+    assert app is not None
+    previous_stylesheet = app.styleSheet()
+    app.setStyleSheet(STYLESHEET)
+    try:
+        dialog = HistoryDialog(repository)
+        qtbot.addWidget(dialog)
+        dialog.show()
+        app.processEvents()
+
+        table = dialog.records_table
+        assert table.item(0, 1).text().endswith("2D6 + 1D8 + 3D20")
+        assert table.rowHeight(0) >= table.sizeHintForRow(0)
+        assert table.visualRect(table.model().index(0, 1)).height() >= (
+            2 * table.fontMetrics().lineSpacing()
+        )
+    finally:
+        app.setStyleSheet(previous_stylesheet)
 
 
 def test_title_search_is_case_insensitive_and_sides_match_any_component(
