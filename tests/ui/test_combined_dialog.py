@@ -194,6 +194,25 @@ def test_initial_component_filters_are_mapped_to_their_own_rows(qtbot) -> None:
     )
 
 
+def test_add_component_rejects_an_unrepresentable_threshold_without_clipping(
+    qtbot,
+) -> None:
+    """Catches silently changing a supplied filter threshold at the UI boundary."""
+    dialog = CombinedRollDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.add_component(
+        RollComponentRequest(1, 6, Comparator.GREATER_THAN, 1_000_001)
+    )
+
+    assert dialog.current_request().components == ()
+    assert (
+        dialog.validation_label.text()
+        == "El umbral debe estar entre -1.000.000 y 1.000.000"
+    )
+    assert dialog.validation_label.isVisibleTo(dialog)
+
+
 def test_preview_summary_and_clear_preserve_title_and_external_last_request(
     qtbot,
 ) -> None:

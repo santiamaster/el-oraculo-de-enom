@@ -34,6 +34,8 @@ from oraculo_enom.domain.models import (
 
 
 QUICK_DICE = (4, 6, 8, 10, 12, 16, 20, 50, 100)
+MIN_FILTER_THRESHOLD = -1_000_000
+MAX_FILTER_THRESHOLD = 1_000_000
 
 
 @dataclass(slots=True)
@@ -238,6 +240,14 @@ class CombinedRollDialog(QDialog):
         """Add or merge one component if the resulting request remains valid."""
         try:
             validate_request(RollRequest((component,), show_sum=True))
+            if component.threshold is not None and not (
+                MIN_FILTER_THRESHOLD
+                <= component.threshold
+                <= MAX_FILTER_THRESHOLD
+            ):
+                raise ValueError(
+                    "El umbral debe estar entre -1.000.000 y 1.000.000"
+                )
             candidate = list(self.current_request().components)
             duplicate_index = next(
                 (
@@ -334,7 +344,7 @@ class CombinedRollDialog(QDialog):
 
         threshold_spin = QSpinBox()
         threshold_spin.setObjectName(f"component{sides}ThresholdSpin")
-        threshold_spin.setRange(-1_000_000, 1_000_000)
+        threshold_spin.setRange(MIN_FILTER_THRESHOLD, MAX_FILTER_THRESHOLD)
         threshold_spin.setValue(
             component.threshold if component.threshold is not None else 1
         )
