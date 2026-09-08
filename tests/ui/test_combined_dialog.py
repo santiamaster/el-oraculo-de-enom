@@ -1,8 +1,9 @@
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog
+from PySide6.QtWidgets import QApplication, QDialog
 
 from oraculo_enom.domain.models import Comparator, RollComponentRequest, RollRequest
 from oraculo_enom.ui.combined_dialog import CombinedRollDialog
+from oraculo_enom.ui.theme import STYLESHEET
 
 
 def row_control(dialog: CombinedRollDialog, sides: int, suffix: str):
@@ -194,23 +195,47 @@ def test_initial_component_filters_are_mapped_to_their_own_rows(qtbot) -> None:
     )
 
 
-def test_add_component_rejects_an_unrepresentable_threshold_without_clipping(
-    qtbot,
-) -> None:
-    """Catches silently changing a supplied filter threshold at the UI boundary."""
+def test_component_threshold_round_trips_beyond_qspinbox_range(qtbot) -> None:
+    """Catches rejecting or clipping an integer accepted by the domain."""
     dialog = CombinedRollDialog()
     qtbot.addWidget(dialog)
+    loaded_threshold = 10**50
+    edited_threshold = -(10**60)
 
     dialog.add_component(
-        RollComponentRequest(1, 6, Comparator.GREATER_THAN, 1_000_001)
+        RollComponentRequest(1, 6, Comparator.GREATER_THAN, loaded_threshold)
     )
 
-    assert dialog.current_request().components == ()
-    assert (
-        dialog.validation_label.text()
-        == "El umbral debe estar entre -1.000.000 y 1.000.000"
+    assert dialog.current_request().components == (
+        RollComponentRequest(1, 6, Comparator.GREATER_THAN, loaded_threshold),
     )
-    assert dialog.validation_label.isVisibleTo(dialog)
+    threshold_editor = row_control(dialog, 6, "ThresholdSpin")
+    threshold_editor.lineEdit().selectAll()
+    qtbot.keyClicks(threshold_editor.lineEdit(), str(edited_threshold))
+
+    assert dialog.current_request().components == (
+        RollComponentRequest(1, 6, Comparator.GREATER_THAN, edited_threshold),
+    )
+
+
+def test_arbitrary_threshold_editor_keeps_spinbox_ergonomics(qtbot) -> None:
+    """Catches the unbounded editor losing the themed spin-box dimensions."""
+    app = QApplication.instance()
+    assert app is not None
+    previous_stylesheet = app.styleSheet()
+    app.setStyleSheet(STYLESHEET)
+    try:
+        dialog = CombinedRollDialog()
+        qtbot.addWidget(dialog)
+        dialog.add_component(RollComponentRequest(1, 6))
+        dialog.show()
+        app.processEvents()
+
+        threshold_editor = row_control(dialog, 6, "ThresholdSpin")
+        count_editor = row_control(dialog, 6, "CountSpin")
+        assert threshold_editor.sizeHint().height() >= count_editor.sizeHint().height()
+    finally:
+        app.setStyleSheet(previous_stylesheet)
 
 
 def test_preview_summary_and_clear_preserve_title_and_external_last_request(

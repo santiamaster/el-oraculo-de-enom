@@ -2,8 +2,10 @@
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QSignalBlocker, Qt, Signal
+from PySide6.QtCore import QRegularExpression, QSignalBlocker, Qt, Signal
+from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -34,8 +36,53 @@ from oraculo_enom.domain.models import (
 
 
 QUICK_DICE = (4, 6, 8, 10, 12, 16, 20, 50, 100)
-MIN_FILTER_THRESHOLD = -1_000_000
-MAX_FILTER_THRESHOLD = 1_000_000
+
+
+class _ArbitraryIntegerSpinBox(QAbstractSpinBox):
+    """Spin-box editor that preserves integers outside Qt's fixed int range."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._value = 0
+        validator = QRegularExpressionValidator(
+            QRegularExpression(r"[+-]?[0-9]+"), self
+        )
+        self.lineEdit().setValidator(validator)
+        self.lineEdit().textChanged.connect(self._remember_valid_value)
+        self.editingFinished.connect(self._restore_valid_text)
+        self.setValue(0)
+
+    def value(self) -> int:
+        parsed = self._parse(self.lineEdit().text())
+        return self._value if parsed is None else parsed
+
+    def setValue(self, value: int) -> None:
+        self._value = value
+        self.lineEdit().setText(str(value))
+
+    def stepBy(self, steps: int) -> None:
+        self.setValue(self.value() + steps)
+
+    def stepEnabled(self) -> QAbstractSpinBox.StepEnabled:
+        return (
+            QAbstractSpinBox.StepEnabledFlag.StepUpEnabled
+            | QAbstractSpinBox.StepEnabledFlag.StepDownEnabled
+        )
+
+    @staticmethod
+    def _parse(text: str) -> int | None:
+        if not text or text in {"+", "-"}:
+            return None
+        return int(text)
+
+    def _remember_valid_value(self, text: str) -> None:
+        parsed = self._parse(text)
+        if parsed is not None:
+            self._value = parsed
+
+    def _restore_valid_text(self) -> None:
+        if self._parse(self.lineEdit().text()) is None:
+            self.lineEdit().setText(str(self._value))
 
 
 @dataclass(slots=True)
@@ -44,7 +91,7 @@ class _ComponentRow:
     count_spin: QSpinBox
     filter_check: QCheckBox
     comparator_combo: QComboBox
-    threshold_spin: QSpinBox
+    threshold_spin: _ArbitraryIntegerSpinBox
     remove_button: QPushButton
 
     def to_request(self) -> RollComponentRequest:
@@ -240,14 +287,6 @@ class CombinedRollDialog(QDialog):
         """Add or merge one component if the resulting request remains valid."""
         try:
             validate_request(RollRequest((component,), show_sum=True))
-            if component.threshold is not None and not (
-                MIN_FILTER_THRESHOLD
-                <= component.threshold
-                <= MAX_FILTER_THRESHOLD
-            ):
-                raise ValueError(
-                    "El umbral debe estar entre -1.000.000 y 1.000.000"
-                )
             candidate = list(self.current_request().components)
             duplicate_index = next(
                 (
@@ -342,9 +381,8 @@ class CombinedRollDialog(QDialog):
         comparator_combo.setEnabled(component.comparator is not None)
         self.component_table.setCellWidget(table_row, 3, comparator_combo)
 
-        threshold_spin = QSpinBox()
+        threshold_spin = _ArbitraryIntegerSpinBox()
         threshold_spin.setObjectName(f"component{sides}ThresholdSpin")
-        threshold_spin.setRange(MIN_FILTER_THRESHOLD, MAX_FILTER_THRESHOLD)
         threshold_spin.setValue(
             component.threshold if component.threshold is not None else 1
         )
