@@ -143,6 +143,19 @@ def test_custom_quantity_is_explicit_enabled_only_when_selected_and_restored(
     assert window.custom_quantity_spin.value() == 35
 
 
+def test_custom_quantity_field_is_centered_and_its_label_is_on_the_right(
+    qtbot, repository: HistoryRepository
+) -> None:
+    """Catches moving the custom quantity field back outside the central inputs."""
+    window = MainWindow(repository)
+    qtbot.addWidget(window)
+    window.show()
+
+    assert window.custom_quantity_spin.x() == window.threshold_spin.x()
+    assert window.custom_quantity_label.x() == window.show_sum_check.x()
+    assert window.custom_quantity_spin.x() < window.custom_quantity_label.x()
+
+
 def test_title_controls_clear_state_and_successful_roll_preserves_title(
     qtbot, repository: HistoryRepository
 ) -> None:

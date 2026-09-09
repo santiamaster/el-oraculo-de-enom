@@ -165,8 +165,8 @@ class MainWindow(QMainWindow):
         self.custom_quantity_spin.valueChanged.connect(self._update_roll_button)
         self.custom_quantity_label = QLabel("Cantidad personalizada")
         self.custom_quantity_label.setObjectName("customQuantityLabel")
-        options.addWidget(self.custom_quantity_label, 0, 2)
-        options.addWidget(self.custom_quantity_spin, 0, 3)
+        options.addWidget(self.custom_quantity_spin, 0, 2)
+        options.addWidget(self.custom_quantity_label, 0, 3)
 
         self.show_sum_check = QCheckBox("Mostrar suma")
         self.show_sum_check.setObjectName("showSumCheck")
