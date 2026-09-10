@@ -119,6 +119,8 @@ class HistoryDialog(QDialog):
         self.records_table.setEditTriggers(
             QTableWidget.EditTrigger.NoEditTriggers
         )
+        self.records_table.setWordWrap(False)
+        self.records_table.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.records_table.verticalHeader().hide()
         header = self.records_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)

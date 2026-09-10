@@ -272,6 +272,46 @@ def test_titled_history_row_is_tall_enough_for_title_and_notation(
         app.setStyleSheet(previous_stylesheet)
 
 
+def test_large_rolls_keep_history_rows_compact_and_full_detail(
+    qtbot, repository: HistoryRepository
+) -> None:
+    """Catches result wrapping turning each history summary into a giant row."""
+    values = tuple(range(1, 1001))
+    for minute in range(5):
+        add_roll(
+            repository,
+            sides=1000,
+            values=values,
+            title=f"Tirada masiva {minute + 1}",
+            created_at=datetime(2026, 9, 10, 12, minute),
+        )
+
+    app = QApplication.instance()
+    assert app is not None
+    previous_stylesheet = app.styleSheet()
+    app.setStyleSheet(STYLESHEET)
+    try:
+        dialog = HistoryDialog(repository)
+        qtbot.addWidget(dialog)
+        dialog.resize(1100, 650)
+        dialog.show()
+        app.processEvents()
+
+        table = dialog.records_table
+        visible_rows_height = sum(
+            table.rowHeight(row) for row in range(table.rowCount())
+        )
+        assert visible_rows_height <= table.viewport().height()
+
+        table.selectRow(0)
+        detail = dialog.detail_view.toPlainText()
+        assert "1000d1000: 1, 2, 3" in detail
+        assert ", 999, 1000" in detail
+        assert detail.endswith("Suma: 500500")
+    finally:
+        app.setStyleSheet(previous_stylesheet)
+
+
 def test_title_search_is_case_insensitive_and_sides_match_any_component(
     qtbot, repository: HistoryRepository
 ) -> None:
