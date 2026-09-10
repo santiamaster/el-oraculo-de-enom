@@ -65,8 +65,8 @@ class MainWindow(QMainWindow):
         self._history_dialog: HistoryDialog | None = None
 
         self.setWindowTitle("El Oráculo de ENOM")
-        self.setMinimumSize(960, 640)
-        self.resize(1180, 760)
+        self.setMinimumSize(960, 620)
+        self.resize(1180, 680)
         self._build_ui()
         self._refresh_recent_history()
 
@@ -217,7 +217,7 @@ class MainWindow(QMainWindow):
         self.results_scroll = QScrollArea()
         self.results_scroll.setObjectName("resultsScroll")
         self.results_scroll.setWidgetResizable(True)
-        self.results_scroll.setMinimumHeight(180)
+        self.results_scroll.setMinimumHeight(100)
         self.results_scroll.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )

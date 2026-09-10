@@ -1,4 +1,7 @@
-"""ENOM color palette and application-wide Qt stylesheet."""
+"""ENOM color palette and application-wide Qt styling."""
+
+from PySide6.QtCore import QRect
+from PySide6.QtWidgets import QProxyStyle, QStyle, QStyleOptionComplex, QWidget
 
 BACKGROUND = "#171311"
 PANEL = "#231d19"
@@ -8,6 +11,49 @@ GOLD_DARK = "#8b6229"
 BORDER = "#665237"
 TEXT = "#efe2c3"
 MUTED = "#a99b83"
+
+
+class SpinBoxProxyStyle(QProxyStyle):
+    """Keep native spin arrows while providing full-size stacked targets."""
+
+    _BUTTON_WIDTH = 24
+
+    def subControlRect(
+        self,
+        control: QStyle.ComplexControl,
+        option: QStyleOptionComplex,
+        sub_control: QStyle.SubControl,
+        widget: QWidget | None = None,
+    ) -> QRect:
+        rect = super().subControlRect(control, option, sub_control, widget)
+        if control != QStyle.ComplexControl.CC_SpinBox:
+            return rect
+
+        frame = option.rect
+        button_left = frame.right() - self._BUTTON_WIDTH + 1
+        upper_height = frame.height() // 2
+        if sub_control == QStyle.SubControl.SC_SpinBoxUp:
+            return QRect(
+                button_left,
+                frame.top(),
+                self._BUTTON_WIDTH,
+                upper_height,
+            )
+        if sub_control == QStyle.SubControl.SC_SpinBoxDown:
+            return QRect(
+                button_left,
+                frame.top() + upper_height,
+                self._BUTTON_WIDTH,
+                frame.height() - upper_height,
+            )
+        if sub_control == QStyle.SubControl.SC_SpinBoxEditField:
+            return QRect(
+                rect.left(),
+                rect.top(),
+                max(0, button_left - rect.left()),
+                rect.height(),
+            )
+        return rect
 
 
 STYLESHEET = f"""

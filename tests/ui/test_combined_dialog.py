@@ -1,9 +1,15 @@
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QLabel,
+    QStyle,
+    QStyleOptionSpinBox,
+)
 
 from oraculo_enom.domain.models import Comparator, RollComponentRequest, RollRequest
 from oraculo_enom.ui.combined_dialog import CombinedRollDialog
-from oraculo_enom.ui.theme import STYLESHEET
+from oraculo_enom.ui.theme import STYLESHEET, SpinBoxProxyStyle
 
 
 def row_control(dialog: CombinedRollDialog, sides: int, suffix: str):
@@ -251,6 +257,72 @@ def test_arbitrary_threshold_editor_keeps_spinbox_ergonomics(qtbot) -> None:
         threshold_editor = row_control(dialog, 6, "ThresholdSpin")
         count_editor = row_control(dialog, 6, "CountSpin")
         assert threshold_editor.sizeHint().height() >= count_editor.sizeHint().height()
+    finally:
+        app.setStyleSheet(previous_stylesheet)
+
+
+def test_low_height_keeps_component_editor_and_actions_visible(qtbot) -> None:
+    """Catches the combined builder clipping controls above the taskbar."""
+    app = QApplication.instance()
+    assert app is not None
+    previous_stylesheet = app.styleSheet()
+    app.setStyleSheet(STYLESHEET)
+    try:
+        dialog = CombinedRollDialog()
+        qtbot.addWidget(dialog)
+        dialog.resize(980, 650)
+        dialog.show()
+        app.processEvents()
+
+        assert dialog.minimumSizeHint().height() <= 650
+        assert dialog.component_table.geometry().bottom() < (
+            dialog.quick_sides_combo.geometry().top()
+        )
+        assert dialog.quick_sides_combo.geometry().bottom() < (
+            dialog.findChild(QLabel, "limitsLabel").geometry().top()
+        )
+        assert dialog.roll_button.geometry().bottom() < dialog.height()
+    finally:
+        app.setStyleSheet(previous_stylesheet)
+
+
+def test_spinbox_buttons_are_stacked_with_full_click_targets(qtbot) -> None:
+    """Catches native spin buttons exposing only a narrow clickable sliver."""
+    app = QApplication.instance()
+    assert app is not None
+    previous_stylesheet = app.styleSheet()
+    app.setStyleSheet(STYLESHEET)
+    try:
+        dialog = CombinedRollDialog()
+        qtbot.addWidget(dialog)
+        dialog.show()
+        app.processEvents()
+        spin = dialog.quantity_spin
+        proxy_style = SpinBoxProxyStyle()
+        spin.setStyle(proxy_style)
+        spin.setValue(10)
+        option = QStyleOptionSpinBox()
+        spin.initStyleOption(option)
+        up_button = spin.style().subControlRect(
+            QStyle.ComplexControl.CC_SpinBox,
+            option,
+            QStyle.SubControl.SC_SpinBoxUp,
+            spin,
+        )
+        down_button = spin.style().subControlRect(
+            QStyle.ComplexControl.CC_SpinBox,
+            option,
+            QStyle.SubControl.SC_SpinBoxDown,
+            spin,
+        )
+
+        assert up_button.width() >= 24
+        assert down_button.width() >= 24
+        assert up_button.bottom() < down_button.top()
+        qtbot.mouseClick(spin, Qt.MouseButton.LeftButton, pos=up_button.center())
+        assert spin.value() == 11
+        qtbot.mouseClick(spin, Qt.MouseButton.LeftButton, pos=down_button.center())
+        assert spin.value() == 10
     finally:
         app.setStyleSheet(previous_stylesheet)
 

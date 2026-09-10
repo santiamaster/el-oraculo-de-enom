@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QFrame,
     QInputDialog,
     QLabel,
     QMessageBox,
@@ -315,6 +316,33 @@ def test_combined_result_badges_keep_readable_height_and_scroll_when_needed(
             badge.height() >= badge.sizeHint().height() for badge in badges
         )
         assert window.results_scroll.verticalScrollBar().maximum() > 0
+    finally:
+        app.setStyleSheet(previous_stylesheet)
+
+
+def test_low_height_keeps_results_summary_and_actions_separate(
+    qtbot, repository: HistoryRepository
+) -> None:
+    """Catches the results viewport overlapping its summary at 1366x768."""
+    app = QApplication.instance()
+    assert app is not None
+    previous_stylesheet = app.styleSheet()
+    app.setStyleSheet(STYLESHEET)
+    try:
+        window = MainWindow(repository)
+        qtbot.addWidget(window)
+        window.resize(1180, 700)
+        window.show()
+        app.processEvents()
+
+        summary_cards = window.findChildren(QFrame, "summaryCard")
+        assert window.minimumSizeHint().height() <= 700
+        assert window.results_scroll.geometry().bottom() < min(
+            card.geometry().top() for card in summary_cards
+        )
+        assert max(card.geometry().bottom() for card in summary_cards) < (
+            window.repeat_button.geometry().top()
+        )
     finally:
         app.setStyleSheet(previous_stylesheet)
 

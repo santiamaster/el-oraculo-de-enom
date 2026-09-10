@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from oraculo_enom.persistence.history import HistoryRepository
 from oraculo_enom.ui.main_window import MainWindow
-from oraculo_enom.ui.theme import STYLESHEET
+from oraculo_enom.ui.theme import STYLESHEET, SpinBoxProxyStyle
 
 
 def main() -> int:
@@ -15,6 +15,7 @@ def main() -> int:
     app.setApplicationName("El Oráculo de ENOM")
     app.setApplicationDisplayName("El Oráculo de ENOM")
     app.setOrganizationName("ENOM")
+    app.setStyle(SpinBoxProxyStyle())
     app.setStyleSheet(STYLESHEET)
 
     try:
