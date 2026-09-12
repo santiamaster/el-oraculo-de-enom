@@ -316,7 +316,7 @@ def test_comparators(comparator: Comparator, expected: tuple[int, ...]) -> None:
 Add a clipboard test expecting:
 
 ```text
-22d20: 7, 18, 20
+3d20: 7, 18, 20
 Suma: 45
 Filtro > 12: 2 de 3
 ```

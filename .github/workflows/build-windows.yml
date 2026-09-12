@@ -1,0 +1,60 @@
+name: Build Windows portable
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest -v
+
+      - name: Build portable application
+        run: pyinstaller El-Oraculo-de-ENOM.spec --clean
+
+      - name: Smoke-check portable application
+        shell: pwsh
+        run: |
+          $distDirectory = Join-Path $PWD "dist/El Oraculo de ENOM"
+          $executable = Join-Path $distDirectory "El Oraculo de ENOM.exe"
+
+          if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+            throw "No se encontró el ejecutable esperado: $executable"
+          }
+
+          $bundledDatabases = Get-ChildItem `
+            -LiteralPath $distDirectory `
+            -Recurse `
+            -File `
+            -Filter "historial.db"
+
+          if ($bundledDatabases) {
+            $paths = $bundledDatabases.FullName -join ", "
+            throw "El paquete contiene una base de desarrollo: $paths"
+          }
+
+      - name: Compress portable application
+        shell: pwsh
+        run: Compress-Archive -Path "dist/El Oraculo de ENOM/*" -DestinationPath "El-Oraculo-de-ENOM-Windows.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: El-Oraculo-de-ENOM-Windows
+          path: El-Oraculo-de-ENOM-Windows.zip
+          if-no-files-found: error
