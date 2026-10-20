@@ -1,5 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+from shutil import copy2, copytree
+
 # PyInstaller's bundled PySide6 hooks collect the Qt libraries and plugins used
 # by the PySide6 modules imported from the application entry point.
 
@@ -52,3 +55,14 @@ distribution = COLLECT(
     upx_exclude=[],
     name="El Oraculo de ENOM",
 )
+
+# PyInstaller 6 places all ``datas`` below ``_internal``.  These legal files
+# must remain visible at the portable root without flattening the runtime
+# layout audited in THIRD_PARTY_NOTICES.md.
+distribution_root = Path(distribution.name)
+copy2("LICENSE", distribution_root / "LICENSE")
+copy2(
+    "THIRD_PARTY_NOTICES.md",
+    distribution_root / "THIRD_PARTY_NOTICES.md",
+)
+copytree("licenses", distribution_root / "licenses", dirs_exist_ok=True)

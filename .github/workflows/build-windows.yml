@@ -49,6 +49,9 @@ jobs:
             throw "El paquete contiene una base de desarrollo: $paths"
           }
 
+      - name: Verify portable distribution
+        run: python scripts/verify_distribution.py "dist/El Oraculo de ENOM"
+
       - name: Compress portable application
         shell: pwsh
         run: Compress-Archive -Path "dist/El Oraculo de ENOM/*" -DestinationPath "El-Oraculo-de-ENOM-Windows.zip"
