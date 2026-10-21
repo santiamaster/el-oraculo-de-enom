@@ -2,6 +2,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import subprocess
 import sys
+import tomllib
 from types import ModuleType
 from zipfile import ZipFile, ZipInfo
 
@@ -10,6 +11,24 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 VERIFIER_PATH = PROJECT_ROOT / "scripts" / "verify_distribution.py"
+
+
+def test_release_build_uses_audited_dependency_versions() -> None:
+    """Prevents CI from silently replacing the audited portable runtime."""
+    project = tomllib.loads(
+        (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]
+    workflow = (PROJECT_ROOT / ".github/workflows/build-windows.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert project["dependencies"] == ["PySide6==6.11.2"]
+    assert "pyinstaller==6.22.2" in project["optional-dependencies"]["dev"]
+    assert (
+        "pyinstaller-hooks-contrib==2026.7"
+        in project["optional-dependencies"]["dev"]
+    )
+    assert 'python-version: "3.12.10"' in workflow
 
 
 def _load_verifier() -> ModuleType:
