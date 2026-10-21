@@ -110,6 +110,29 @@ pyproject.toml
 
 El flujo se ejecuta para cambios en `main`, pull requests y etiquetas que comienzan con `v`. Solo publica un artefacto de Actions; no crea una GitHub Release.
 
+## Avisos legales incluidos en el portable
+
+La carpeta portable contiene en su raíz:
+
+- `LICENSE`, con la licencia de El Oráculo de ENOM.
+- `THIRD_PARTY_NOTICES.md`, con el inventario de componentes redistribuidos.
+- `licenses/`, con los textos de licencia y avisos correspondientes.
+
+La compilación reproducible de Windows fija Python 3.12.10, PySide6/Qt 6.11.2,
+PyInstaller 6.22.2 y `pyinstaller-hooks-contrib` 2026.7. Si se cambia alguna de
+estas versiones, se debe revisar nuevamente el inventario legal antes de
+distribuir un artefacto.
+
+Podés comprobar una carpeta o un ZIP portable mediante:
+
+```powershell
+python scripts/verify_distribution.py "dist/El Oraculo de ENOM"
+```
+
+El verificador exige los archivos legales y rechaza bases de desarrollo,
+código fuente, pruebas, rutas ZIP inseguras y colisiones incompatibles con
+Windows.
+
 ## Licencia
 
 El Oráculo de ENOM se distribuye bajo la licencia [GNU General Public License v2.0 o posterior](LICENSE), identificada mediante SPDX como `GPL-2.0-or-later`.

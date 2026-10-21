@@ -31,6 +31,19 @@ def test_release_build_uses_audited_dependency_versions() -> None:
     assert 'python-version: "3.12.10"' in workflow
 
 
+def test_pyinstaller_bootloader_terms_are_documented() -> None:
+    """Keeps the embedded bootloader traceable to its redistribution terms."""
+    notices = (PROJECT_ROOT / "THIRD_PARTY_NOTICES.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "## PyInstaller bootloader and runtime support" in notices
+    assert "6.22.2" in notices
+    assert "Bootloader Exception" in notices
+    assert "licenses/PyInstaller-6.22.2-COPYING.txt" in notices
+    assert (PROJECT_ROOT / "licenses/PyInstaller-6.22.2-COPYING.txt").is_file()
+
+
 def _load_verifier() -> ModuleType:
     assert VERIFIER_PATH.is_file(), "falta el verificador de la distribución"
     spec = spec_from_file_location("verify_distribution", VERIFIER_PATH)

@@ -1,18 +1,47 @@
 # Third-party notices
 
 This inventory covers the Python runtime, PySide6, Shiboken6, the Qt libraries
-and plugins shipped in the accepted Windows portable, and their identified
-vendored or statically linked dependencies. PyInstaller and build-only Python
-packages are intentionally reserved for the next release-engineering tranche.
+and plugins shipped in the accepted Windows portable, their identified vendored
+or statically linked dependencies, and the PyInstaller bootloader and runtime
+support embedded in the executable. Build-only Python packages that are not
+present in the portable, such as pytest and pytest-qt, are excluded.
 
 Versions were established from the bundled binaries and, for CPython's linked
 extensions, from the dependency manifest of the exact CPython 3.12.10 tag.
-The accepted artifact was produced from commit `58d28a631fdfb764bd4d97445d277d024cb19a77`.
+The accepted functional artifact was produced from commit
+`58d28a631fdfb764bd4d97445d277d024cb19a77`. The audited build versions were
+then pinned at commit `b67c339f30bcd6a6940898dd5fcce6fb02db5705` and reproduced
+successfully by Windows workflow run 39535094753.
 Qt versions and components were established from the bundled binaries and
 checked against Qt's official 6.11.2 licensing pages and the corresponding
 `v6.11.2` source tags. The Qt PDF snapshot is tied to the Chromium submodule
 commit recorded by that exact Qt tag. This inventory was reviewed on
-2026-09-16.
+2026-10-21.
+
+## PyInstaller bootloader and runtime support
+
+- Build tool version: 6.22.2
+- Copyright: 2002-2023 McMillan Enterprises, Giovanni Bajo and the
+  PyInstaller Development Team; see the complete terms
+- License identifiers: GPL-2.0-or-later WITH Bootloader-exception for the
+  bootloader and loader; Apache-2.0 for embedded run-time hooks and additional
+  run-time modules
+- Upstream: https://pyinstaller.org/ and
+  https://github.com/pyinstaller/pyinstaller
+- Local terms:
+  [PyInstaller COPYING and Bootloader Exception](licenses/PyInstaller-6.22.2-COPYING.txt)
+  and [Apache License 2.0](licenses/Qt-6.11.2-Apache-2.0.txt)
+- Bundled evidence: the Windows `runw.exe` bootloader is embedded in
+  `El Oraculo de ENOM.exe`; PyInstaller also embeds its loader, the
+  `pyi_rth_inspect.py` and `pyi_rth_pyside6.py` run-time hooks, and
+  `_pyi_rth_utils`
+
+PyInstaller itself is used only as a build tool and is not distributed as an
+installable Python package in the portable. Its Bootloader Exception grants
+unlimited permission to link or embed the compiled bootloader and related files
+in another program and distribute that combined executable without restrictions
+arising solely from those files. The complete exception and the terms that still
+apply to PyInstaller itself are preserved in the local COPYING file above.
 
 ## CPython
 
