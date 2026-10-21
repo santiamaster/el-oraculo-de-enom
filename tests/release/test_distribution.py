@@ -305,10 +305,13 @@ def test_unsafe_zip_member_is_reported(
     _zip_directory(distribution, archive)
     with ZipFile(archive, "a") as output:
         output.writestr(unsafe_path, b"unsafe")
+    with ZipFile(archive) as stored_archive:
+        stored_unsafe_path = stored_archive.infolist()[-1].filename
     verifier = _load_verifier()
 
-    assert f"Ruta ZIP no segura: {unsafe_path}" in verifier.validate_distribution(
-        archive
+    assert (
+        f"Ruta ZIP no segura: {stored_unsafe_path}"
+        in verifier.validate_distribution(archive)
     )
 
 
