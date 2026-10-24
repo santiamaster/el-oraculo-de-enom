@@ -1,4 +1,6 @@
+import hashlib
 from importlib.util import module_from_spec, spec_from_file_location
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -73,6 +75,318 @@ def _zip_directory(source: Path, destination: Path) -> None:
         for path in sorted(source.rglob("*")):
             if path.is_file():
                 archive.write(path, path.relative_to(source).as_posix())
+
+
+def _write_valid_release_assets(root: Path) -> tuple[Path, Path, Path]:
+    distribution = root / "distribution"
+    _write_valid_distribution(distribution)
+    portable = root / "El-Oraculo-de-ENOM-Windows.zip"
+    _zip_directory(distribution, portable)
+
+    checksum = root / "El-Oraculo-de-ENOM-Windows.zip.sha256"
+    digest = hashlib.sha256(portable.read_bytes()).hexdigest()
+    checksum.write_text(f"{digest}  {portable.name}\n", encoding="utf-8")
+
+    sbom = root / "El-Oraculo-de-ENOM-Windows.sbom.cdx.json"
+    sbom.write_text(
+        json.dumps(
+            {
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.6",
+                "version": 1,
+                "metadata": {
+                    "component": {
+                        "type": "application",
+                        "name": "el-oraculo-de-enom",
+                        "version": "0.1.0",
+                    }
+                },
+                "components": [
+                    {
+                        "type": "library",
+                        "name": "PySide6",
+                        "version": "6.11.2",
+                        "purl": "pkg:pypi/pyside6@6.11.2",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return portable, sbom, checksum
+
+
+def test_valid_release_assets_have_no_contract_violations(
+    tmp_path: Path,
+) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    verifier = _load_verifier()
+
+    assert verifier.validate_release_assets(portable, sbom, checksum) == []
+
+
+@pytest.mark.parametrize(
+    ("asset", "expected_error"),
+    [
+        ("sbom", "No existe el archivo SBOM CycloneDX:"),
+        ("checksum", "No existe el archivo SHA-256:"),
+    ],
+)
+def test_missing_release_metadata_file_is_reported(
+    tmp_path: Path, asset: str, expected_error: str
+) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    selected = sbom if asset == "sbom" else checksum
+    selected.unlink()
+    verifier = _load_verifier()
+
+    errors = verifier.validate_release_assets(portable, sbom, checksum)
+
+    assert any(error.startswith(expected_error) for error in errors)
+
+
+def test_malformed_checksum_file_is_reported(tmp_path: Path) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    checksum.write_text("not-a-checksum\n", encoding="utf-8")
+    verifier = _load_verifier()
+
+    assert (
+        "Formato SHA-256 inválido: se espera hexadecimal minúsculo, dos espacios "
+        "y el nombre del ZIP"
+        in verifier.validate_release_assets(portable, sbom, checksum)
+    )
+
+
+def test_checksum_for_another_filename_is_reported(tmp_path: Path) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    digest = hashlib.sha256(portable.read_bytes()).hexdigest()
+    checksum.write_text(f"{digest}  another.zip\n", encoding="utf-8")
+    verifier = _load_verifier()
+
+    assert (
+        "El archivo SHA-256 referencia another.zip, no " + portable.name
+        in verifier.validate_release_assets(portable, sbom, checksum)
+    )
+
+
+def test_checksum_mismatch_is_reported(tmp_path: Path) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    checksum.write_text(f"{'0' * 64}  {portable.name}\n", encoding="utf-8")
+    verifier = _load_verifier()
+
+    assert (
+        f"El SHA-256 no coincide con {portable.name}"
+        in verifier.validate_release_assets(portable, sbom, checksum)
+    )
+
+
+def test_release_assets_require_a_zip_file(tmp_path: Path) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    distribution = portable.with_name("distribution")
+    checksum.write_text(
+        f"{'0' * 64}  {distribution.name}\n", encoding="utf-8"
+    )
+    verifier = _load_verifier()
+
+    assert (
+        f"El activo portable debe ser un archivo ZIP válido: {distribution}"
+        in verifier.validate_release_assets(distribution, sbom, checksum)
+    )
+
+
+def test_cli_rejects_directory_in_release_mode(tmp_path: Path) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    distribution = portable.with_name("distribution")
+    checksum.write_text(
+        f"{'0' * 64}  {distribution.name}\n", encoding="utf-8"
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(VERIFIER_PATH),
+            str(distribution),
+            "--sbom",
+            str(sbom),
+            "--sha256",
+            str(checksum),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "El activo portable debe ser un archivo ZIP válido" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize("asset", ["sbom", "checksum"])
+def test_non_utf8_release_metadata_is_reported(
+    tmp_path: Path, asset: str
+) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    selected = sbom if asset == "sbom" else checksum
+    selected.write_bytes(b"\xff\xfe")
+    verifier = _load_verifier()
+
+    errors = verifier.validate_release_assets(portable, sbom, checksum)
+
+    label = "SBOM CycloneDX" if asset == "sbom" else "SHA-256"
+    assert f"No se pudo leer el archivo {label} como UTF-8" in errors
+
+
+@pytest.mark.parametrize("asset", ["sbom", "checksum"])
+def test_release_metadata_oserror_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, asset: str
+) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    verifier = _load_verifier()
+    selected = sbom if asset == "sbom" else checksum
+    original_read_text = Path.read_text
+
+    def denied_read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path == selected:
+            raise PermissionError("denied for test")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", denied_read_text)
+
+    errors = verifier.validate_release_assets(portable, sbom, checksum)
+
+    label = "SBOM CycloneDX" if asset == "sbom" else "SHA-256"
+    assert any(
+        error.startswith(f"No se pudo leer el archivo {label}:")
+        for error in errors
+    )
+
+
+def test_zip_hash_oserror_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    verifier = _load_verifier()
+    original_open = Path.open
+
+    def denied_open(path: Path, *args: object, **kwargs: object):
+        if path == portable and args and args[0] == "rb":
+            raise PermissionError("denied for test")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", denied_open)
+
+    errors = verifier.validate_release_assets(portable, sbom, checksum)
+
+    assert any(
+        error.startswith(f"No se pudo calcular el SHA-256 de {portable.name}:")
+        for error in errors
+    )
+
+
+def test_invalid_sbom_json_is_reported(tmp_path: Path) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    sbom.write_text("{not-json", encoding="utf-8")
+    verifier = _load_verifier()
+
+    assert (
+        "El SBOM no contiene JSON válido"
+        in verifier.validate_release_assets(portable, sbom, checksum)
+    )
+
+
+def test_non_cyclonedx_1_6_sbom_is_reported(tmp_path: Path) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    document = json.loads(sbom.read_text(encoding="utf-8"))
+    document["bomFormat"] = "SPDX"
+    document["specVersion"] = "2.3"
+    sbom.write_text(json.dumps(document), encoding="utf-8")
+    verifier = _load_verifier()
+
+    assert (
+        "El SBOM debe declarar bomFormat CycloneDX y specVersion 1.6"
+        in verifier.validate_release_assets(portable, sbom, checksum)
+    )
+
+
+def test_boolean_sbom_serial_is_reported(tmp_path: Path) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    document = json.loads(sbom.read_text(encoding="utf-8"))
+    document["version"] = True
+    sbom.write_text(json.dumps(document), encoding="utf-8")
+    verifier = _load_verifier()
+
+    assert (
+        "El SBOM debe declarar una versión serial positiva"
+        in verifier.validate_release_assets(portable, sbom, checksum)
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_error"),
+    [
+        (
+            "root",
+            "El SBOM no declara la aplicación raíz el-oraculo-de-enom==0.1.0",
+        ),
+        ("pyside6", "El SBOM no declara el componente PySide6==6.11.2"),
+    ],
+)
+def test_required_sbom_component_is_reported(
+    tmp_path: Path, mutation: str, expected_error: str
+) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    document = json.loads(sbom.read_text(encoding="utf-8"))
+    if mutation == "root":
+        document["metadata"]["component"]["version"] = "9.9.9"
+    else:
+        document["components"] = []
+    sbom.write_text(json.dumps(document), encoding="utf-8")
+    verifier = _load_verifier()
+
+    assert expected_error in verifier.validate_release_assets(
+        portable, sbom, checksum
+    )
+
+
+@pytest.mark.parametrize("option", ["--sbom", "--sha256"])
+def test_cli_requires_sbom_and_sha256_options_together(
+    tmp_path: Path, option: str
+) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    selected = sbom if option == "--sbom" else checksum
+
+    result = subprocess.run(
+        [sys.executable, str(VERIFIER_PATH), str(portable), option, str(selected)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "--sbom y --sha256 deben usarse juntos" in result.stderr
+
+
+def test_cli_returns_zero_for_valid_release_assets(tmp_path: Path) -> None:
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(VERIFIER_PATH),
+            str(portable),
+            "--sbom",
+            str(sbom),
+            "--sha256",
+            str(checksum),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == f"Activos de publicación válidos: {portable}\n"
+    assert result.stderr == ""
 
 
 def test_valid_directory_has_no_contract_violations(tmp_path: Path) -> None:
