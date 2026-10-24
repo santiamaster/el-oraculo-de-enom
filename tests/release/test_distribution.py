@@ -33,6 +33,147 @@ def test_release_build_uses_audited_dependency_versions() -> None:
     assert 'python-version: "3.12.10"' in workflow
 
 
+def test_release_build_uses_bounded_cyclonedx_tooling() -> None:
+    """Prevents the SBOM generator from changing across major versions."""
+    project = tomllib.loads(
+        (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]
+
+    assert "cyclonedx-bom>=7.3,<8" in project["optional-dependencies"]["dev"]
+
+
+def _workflow_step(workflow: str, heading: str) -> str:
+    marker = f"      - {heading}\n"
+    start = workflow.index(marker)
+    end = workflow.find("\n      - ", start + len(marker))
+    return workflow[start:] if end == -1 else workflow[start:end]
+
+
+def _release_workflow_contract_errors(workflow: str) -> list[str]:
+    errors: list[str] = []
+    try:
+        prepare = _workflow_step(workflow, "name: Prepare runtime environment for SBOM")
+        generate = _workflow_step(workflow, "name: Generate validated CycloneDX SBOM")
+        checksum = _workflow_step(workflow, "name: Generate SHA-256 checksum")
+        verify = _workflow_step(workflow, "name: Verify release metadata")
+        upload = _workflow_step(workflow, "uses: actions/upload-artifact@v4")
+    except ValueError:
+        return ["missing release metadata step"]
+
+    native_commands = [
+        "python -m venv .sbom-venv",
+        '& ".sbom-venv/Scripts/python.exe" -m pip install .',
+        '& ".sbom-venv/Scripts/python.exe" -m pip uninstall --yes pip',
+    ]
+    for command in native_commands:
+        if command not in prepare:
+            errors.append(f"missing native command: {command}")
+            continue
+        tail = prepare.split(command, maxsplit=1)[1].lstrip().splitlines()
+        if not tail or not tail[0].startswith("if ($LASTEXITCODE -ne 0) { throw"):
+            errors.append(f"native command is not fail-fast: {command}")
+
+    generator_snippets = [
+        "python -m cyclonedx_py environment",
+        "--pyproject pyproject.toml",
+        "--spec-version 1.6",
+        "--output-reproducible",
+        "--output-format JSON",
+        "--output-file El-Oraculo-de-ENOM-Windows.sbom.cdx.json",
+        "--validate",
+    ]
+    if any(snippet not in generate for snippet in generator_snippets):
+        errors.append("generator flags are incomplete")
+    if not generate.rstrip().endswith(".sbom-venv"):
+        errors.append("generator does not target the runtime environment")
+
+    checksum_snippets = [
+        '$zipName = "El-Oraculo-de-ENOM-Windows.zip"',
+        "Get-FileHash -LiteralPath $zipName -Algorithm SHA256",
+        ".Hash.ToLowerInvariant()",
+        '"$hash  $zipName"',
+    ]
+    if any(snippet not in checksum for snippet in checksum_snippets):
+        errors.append("checksum contract is incomplete")
+
+    verifier_snippets = [
+        "python scripts/verify_distribution.py",
+        '"El-Oraculo-de-ENOM-Windows.zip"',
+        '--sbom "El-Oraculo-de-ENOM-Windows.sbom.cdx.json"',
+        '--sha256 "El-Oraculo-de-ENOM-Windows.zip.sha256"',
+    ]
+    if any(snippet not in verify for snippet in verifier_snippets):
+        errors.append("integrated verifier invocation is incomplete")
+
+    for step_name, step in (
+        ("generate", generate),
+        ("verify", verify),
+        ("upload", upload),
+    ):
+        if "continue-on-error:" in step:
+            errors.append(f"{step_name} step may ignore failures")
+
+    positions = [workflow.index(step) for step in (generate, checksum, verify, upload)]
+    if positions != sorted(positions):
+        errors.append("release metadata steps are out of order")
+
+    expected_upload_paths = (
+        "          path: |\n"
+        "            El-Oraculo-de-ENOM-Windows.zip\n"
+        "            El-Oraculo-de-ENOM-Windows.sbom.cdx.json\n"
+        "            El-Oraculo-de-ENOM-Windows.zip.sha256\n"
+    )
+    if expected_upload_paths not in upload:
+        errors.append("upload paths are not the exact three release assets")
+    if "name: El-Oraculo-de-ENOM-Windows" not in upload:
+        errors.append("artifact name is incorrect")
+    if "if-no-files-found: error" not in upload:
+        errors.append("upload does not reject missing files")
+    return errors
+
+
+def test_windows_workflow_generates_and_validates_release_metadata() -> None:
+    """Pins the three-asset release pipeline consumed by later gates."""
+    workflow = (PROJECT_ROOT / ".github/workflows/build-windows.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert _release_workflow_contract_errors(workflow) == []
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_error"),
+    [
+        ("runtime-target", "generator does not target the runtime environment"),
+        ("continue-on-error", "verify step may ignore failures"),
+        ("upload-before-verify", "release metadata steps are out of order"),
+    ],
+)
+def test_workflow_contract_rejects_material_mutations(
+    mutation: str, expected_error: str
+) -> None:
+    workflow = (PROJECT_ROOT / ".github/workflows/build-windows.yml").read_text(
+        encoding="utf-8"
+    )
+    if mutation == "runtime-target":
+        workflow = workflow.replace("          .sbom-venv\n", "", 1)
+    elif mutation == "continue-on-error":
+        workflow = workflow.replace(
+            "      - name: Verify release metadata\n",
+            "      - name: Verify release metadata\n        continue-on-error: true\n",
+            1,
+        )
+    else:
+        verify_start = workflow.index("      - name: Verify release metadata\n")
+        upload_start = workflow.index("      - uses: actions/upload-artifact@v4\n")
+        prefix = workflow[:verify_start]
+        verify_block = workflow[verify_start:upload_start]
+        upload_block = workflow[upload_start:]
+        workflow = prefix + upload_block + "\n" + verify_block
+
+    assert expected_error in _release_workflow_contract_errors(workflow)
+
+
 def test_pyinstaller_bootloader_terms_are_documented() -> None:
     """Keeps the embedded bootloader traceable to its redistribution terms."""
     notices = (PROJECT_ROOT / "THIRD_PARTY_NOTICES.md").read_text(

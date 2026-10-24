@@ -56,8 +56,47 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path "dist/El Oraculo de ENOM/*" -DestinationPath "El-Oraculo-de-ENOM-Windows.zip"
 
+      - name: Prepare runtime environment for SBOM
+        shell: pwsh
+        run: |
+          python -m venv .sbom-venv
+          if ($LASTEXITCODE -ne 0) { throw "No se pudo crear el entorno SBOM" }
+          & ".sbom-venv/Scripts/python.exe" -m pip install .
+          if ($LASTEXITCODE -ne 0) { throw "No se pudo instalar el runtime para el SBOM" }
+          & ".sbom-venv/Scripts/python.exe" -m pip uninstall --yes pip
+          if ($LASTEXITCODE -ne 0) { throw "No se pudo retirar pip del entorno SBOM" }
+
+      - name: Generate validated CycloneDX SBOM
+        run: >-
+          python -m cyclonedx_py environment
+          --pyproject pyproject.toml
+          --spec-version 1.6
+          --output-reproducible
+          --output-format JSON
+          --output-file El-Oraculo-de-ENOM-Windows.sbom.cdx.json
+          --validate
+          .sbom-venv
+
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $zipName = "El-Oraculo-de-ENOM-Windows.zip"
+          $checksumName = "$zipName.sha256"
+          $hash = (Get-FileHash -LiteralPath $zipName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $zipName" | Set-Content -LiteralPath $checksumName -Encoding utf8NoBOM
+
+      - name: Verify release metadata
+        run: >-
+          python scripts/verify_distribution.py
+          "El-Oraculo-de-ENOM-Windows.zip"
+          --sbom "El-Oraculo-de-ENOM-Windows.sbom.cdx.json"
+          --sha256 "El-Oraculo-de-ENOM-Windows.zip.sha256"
+
       - uses: actions/upload-artifact@v4
         with:
           name: El-Oraculo-de-ENOM-Windows
-          path: El-Oraculo-de-ENOM-Windows.zip
+          path: |
+            El-Oraculo-de-ENOM-Windows.zip
+            El-Oraculo-de-ENOM-Windows.sbom.cdx.json
+            El-Oraculo-de-ENOM-Windows.zip.sha256
           if-no-files-found: error
