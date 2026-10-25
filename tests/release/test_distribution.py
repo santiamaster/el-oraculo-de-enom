@@ -42,6 +42,20 @@ def test_release_build_uses_bounded_cyclonedx_tooling() -> None:
     assert "cyclonedx-bom>=7.3,<8" in project["optional-dependencies"]["dev"]
 
 
+def test_release_workflow_uses_node24_actions() -> None:
+    """Keeps CI on supported official actions instead of Node.js 20 releases."""
+    workflow = (PROJECT_ROOT / ".github/workflows/build-windows.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "uses: actions/checkout@v7" in workflow
+    assert "uses: actions/setup-python@v7" in workflow
+    assert "uses: actions/upload-artifact@v7" in workflow
+    assert "uses: actions/checkout@v4" not in workflow
+    assert "uses: actions/setup-python@v5" not in workflow
+    assert "uses: actions/upload-artifact@v4" not in workflow
+
+
 def _workflow_step(workflow: str, heading: str) -> str:
     marker = f"      - {heading}\n"
     start = workflow.index(marker)
@@ -56,7 +70,7 @@ def _release_workflow_contract_errors(workflow: str) -> list[str]:
         generate = _workflow_step(workflow, "name: Generate validated CycloneDX SBOM")
         checksum = _workflow_step(workflow, "name: Generate SHA-256 checksum")
         verify = _workflow_step(workflow, "name: Verify release metadata")
-        upload = _workflow_step(workflow, "uses: actions/upload-artifact@v4")
+        upload = _workflow_step(workflow, "uses: actions/upload-artifact@v7")
     except ValueError:
         return ["missing release metadata step"]
 
@@ -165,7 +179,7 @@ def test_workflow_contract_rejects_material_mutations(
         )
     else:
         verify_start = workflow.index("      - name: Verify release metadata\n")
-        upload_start = workflow.index("      - uses: actions/upload-artifact@v4\n")
+        upload_start = workflow.index("      - uses: actions/upload-artifact@v7\n")
         prefix = workflow[:verify_start]
         verify_block = workflow[verify_start:upload_start]
         upload_block = workflow[upload_start:]
