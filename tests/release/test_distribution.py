@@ -42,6 +42,19 @@ def test_release_build_uses_bounded_cyclonedx_tooling() -> None:
     assert "cyclonedx-bom>=7.3,<8" in project["optional-dependencies"]["dev"]
 
 
+def test_release_status_closes_tramo_15_without_conflicting_state() -> None:
+    """Prevents the completed metadata gate from remaining marked in progress."""
+    status = (PROJECT_ROOT / "docs/release/1.0.0-status.md").read_text(
+        encoding="utf-8"
+    )
+    tramo_15 = status.split("### Tramo 15 —", maxsplit=1)[1].split(
+        "## Regla de publicación", maxsplit=1
+    )[0]
+
+    assert tramo_15.count("Estado: **COMPLETO**.") == 1
+    assert "Estado: **EN PROGRESO**." not in tramo_15
+
+
 def test_release_workflow_uses_node24_actions() -> None:
     """Keeps CI on supported official actions instead of Node.js 20 releases."""
     workflow = (PROJECT_ROOT / ".github/workflows/build-windows.yml").read_text(
