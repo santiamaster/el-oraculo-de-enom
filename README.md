@@ -2,7 +2,7 @@
 
 Aplicación de escritorio para lanzar dados, analizar resultados y conservar un historial local. Está pensada para funcionar desde el código fuente o como una carpeta portable en Windows, sin instalador.
 
-Versión actual: `0.1.0`.
+Versión actual: `1.0.0`.
 
 ## Funciones
 
@@ -72,7 +72,7 @@ La carpeta que contiene la aplicación debe permitir escritura. La base se crea 
 
 ### Restablecimiento obligatorio de la base experimental
 
-Antes de probar esta compilación preliminar, retirá o eliminá manualmente `datos/historial.db`. El historial experimental de compilaciones anteriores no es compatible con el esquema definitivo previo a `1.0.0`; la aplicación creará una base nueva al volver a iniciarse. Si necesitás conservarlo como referencia, archivá el archivo fuera de la carpeta portable en lugar de eliminarlo.
+Antes de iniciar `1.0.0`, retirá o eliminá manualmente `datos/historial.db`. El historial experimental de compilaciones anteriores no es compatible con el esquema definitivo de `1.0.0`; la aplicación creará una base nueva al volver a iniciarse. Si necesitás conservarlo como referencia, archivá el archivo fuera de la carpeta portable en lugar de eliminarlo.
 
 ## Checklist de aceptación manual en Windows
 

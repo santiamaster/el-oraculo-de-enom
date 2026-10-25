@@ -3,11 +3,9 @@
 Todos los cambios destacados de El Oráculo de ENOM se documentan en este archivo.
 
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
-y el proyecto adopta [Versionado Semántico](https://semver.org/lang/es/). La
-fecha definitiva y el encabezado de la versión `1.0.0` se incorporarán cuando
-se congele el candidato final.
+y el proyecto adopta [Versionado Semántico](https://semver.org/lang/es/).
 
-## [Unreleased]
+## [1.0.0] - 2026-10-25
 
 ### Added
 

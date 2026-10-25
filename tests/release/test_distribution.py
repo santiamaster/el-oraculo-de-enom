@@ -42,13 +42,39 @@ def test_release_build_uses_bounded_cyclonedx_tooling() -> None:
     assert "cyclonedx-bom>=7.3,<8" in project["optional-dependencies"]["dev"]
 
 
+def test_release_candidate_version_is_consistent(tmp_path: Path) -> None:
+    """Pins every release-facing version declaration to the final candidate."""
+    project_version = tomllib.loads(
+        (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]["version"]
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (PROJECT_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    notes = (PROJECT_ROOT / "docs/release/1.0.0-notes.md").read_text(
+        encoding="utf-8"
+    )
+    status = (PROJECT_ROOT / "docs/release/1.0.0-status.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert project_version == "1.0.0"
+    assert "Versión actual: `1.0.0`." in readme
+    assert "## [1.0.0] - 2026-10-25" in changelog
+    assert notes.startswith("# El Oráculo de ENOM 1.0.0\n")
+    assert "| Versión declarada actualmente | `1.0.0` |" in status
+
+    portable, sbom, checksum = _write_valid_release_assets(tmp_path)
+    document = json.loads(sbom.read_text(encoding="utf-8"))
+    assert document["metadata"]["component"]["version"] == project_version
+    assert _load_verifier().validate_release_assets(portable, sbom, checksum) == []
+
+
 def test_release_status_closes_tramo_15_without_conflicting_state() -> None:
     """Prevents the completed metadata gate from remaining marked in progress."""
     status = (PROJECT_ROOT / "docs/release/1.0.0-status.md").read_text(
         encoding="utf-8"
     )
     tramo_15 = status.split("### Tramo 15 —", maxsplit=1)[1].split(
-        "## Regla de publicación", maxsplit=1
+        "### Tramo 16 —", maxsplit=1
     )[0]
 
     assert tramo_15.count("Estado: **COMPLETO**.") == 1
@@ -266,7 +292,7 @@ def _write_valid_release_assets(root: Path) -> tuple[Path, Path, Path]:
                     "component": {
                         "type": "application",
                         "name": "el-oraculo-de-enom",
-                        "version": "0.1.0",
+                        "version": "1.0.0",
                     }
                 },
                 "components": [
@@ -494,7 +520,7 @@ def test_boolean_sbom_serial_is_reported(tmp_path: Path) -> None:
     [
         (
             "root",
-            "El SBOM no declara la aplicación raíz el-oraculo-de-enom==0.1.0",
+            "El SBOM no declara la aplicación raíz el-oraculo-de-enom==1.0.0",
         ),
         ("pyside6", "El SBOM no declara el componente PySide6==6.11.2"),
     ],
