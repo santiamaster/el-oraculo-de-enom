@@ -1,0 +1,102 @@
+name: Build Windows portable
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12.10"
+
+      - name: Install dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest -v
+
+      - name: Build portable application
+        run: pyinstaller El-Oraculo-de-ENOM.spec --clean
+
+      - name: Smoke-check portable application
+        shell: pwsh
+        run: |
+          $distDirectory = Join-Path $PWD "dist/El Oraculo de ENOM"
+          $executable = Join-Path $distDirectory "El Oraculo de ENOM.exe"
+
+          if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+            throw "No se encontró el ejecutable esperado: $executable"
+          }
+
+          $bundledDatabases = Get-ChildItem `
+            -LiteralPath $distDirectory `
+            -Recurse `
+            -File `
+            -Filter "historial.db"
+
+          if ($bundledDatabases) {
+            $paths = $bundledDatabases.FullName -join ", "
+            throw "El paquete contiene una base de desarrollo: $paths"
+          }
+
+      - name: Verify portable distribution
+        run: python scripts/verify_distribution.py "dist/El Oraculo de ENOM"
+
+      - name: Compress portable application
+        shell: pwsh
+        run: Compress-Archive -Path "dist/El Oraculo de ENOM/*" -DestinationPath "El-Oraculo-de-ENOM-Windows.zip"
+
+      - name: Prepare runtime environment for SBOM
+        shell: pwsh
+        run: |
+          python -m venv .sbom-venv
+          if ($LASTEXITCODE -ne 0) { throw "No se pudo crear el entorno SBOM" }
+          & ".sbom-venv/Scripts/python.exe" -m pip install .
+          if ($LASTEXITCODE -ne 0) { throw "No se pudo instalar el runtime para el SBOM" }
+          & ".sbom-venv/Scripts/python.exe" -m pip uninstall --yes pip
+          if ($LASTEXITCODE -ne 0) { throw "No se pudo retirar pip del entorno SBOM" }
+
+      - name: Generate validated CycloneDX SBOM
+        run: >-
+          python -m cyclonedx_py environment
+          --pyproject pyproject.toml
+          --spec-version 1.6
+          --output-reproducible
+          --output-format JSON
+          --output-file El-Oraculo-de-ENOM-Windows.sbom.cdx.json
+          --validate
+          .sbom-venv
+
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $zipName = "El-Oraculo-de-ENOM-Windows.zip"
+          $checksumName = "$zipName.sha256"
+          $hash = (Get-FileHash -LiteralPath $zipName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $zipName" | Set-Content -LiteralPath $checksumName -Encoding utf8NoBOM
+
+      - name: Verify release metadata
+        run: >-
+          python scripts/verify_distribution.py
+          "El-Oraculo-de-ENOM-Windows.zip"
+          --sbom "El-Oraculo-de-ENOM-Windows.sbom.cdx.json"
+          --sha256 "El-Oraculo-de-ENOM-Windows.zip.sha256"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: El-Oraculo-de-ENOM-Windows
+          path: |
+            El-Oraculo-de-ENOM-Windows.zip
+            El-Oraculo-de-ENOM-Windows.sbom.cdx.json
+            El-Oraculo-de-ENOM-Windows.zip.sha256
+          if-no-files-found: error
