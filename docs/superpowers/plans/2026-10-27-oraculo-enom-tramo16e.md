@@ -73,7 +73,7 @@ historial y repetición con umbrales de 5.001 dígitos. Confirmar RED por
 `ValueError`, reutilizar `format_integer()` en todos los puntos de presentación y
 confirmar GREEN más la suite completa.
 
-- [ ] **Step 6: Registrar el checkpoint de revalidación**
+- [x] **Step 6: Registrar el checkpoint de revalidación**
 
 Actualizar `docs/release/1.0.0-status.md` con el estado del PR, el run verde del
 candidato anterior, el hallazgo corregido y la necesidad de generar un nuevo
