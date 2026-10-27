@@ -214,6 +214,34 @@ def test_records_are_newest_first_and_selection_shows_read_only_details(
     assert dialog.selected_record_id == middle.id
 
 
+def test_history_detail_copy_and_repeat_support_threshold_beyond_decimal_limit(
+    qtbot, repository: HistoryRepository
+) -> None:
+    threshold = -(10**5000)
+    record = add_roll(
+        repository,
+        sides=6,
+        values=(4,),
+        created_at=datetime(2026, 9, 7, 12, 0),
+        show_sum=False,
+        comparator=Comparator.GREATER_THAN,
+        threshold=threshold,
+    )
+    dialog = HistoryDialog(repository)
+    qtbot.addWidget(dialog)
+    repeated: list[RollRequest] = []
+    dialog.repeat_requested.connect(repeated.append)
+
+    dialog.records_table.selectRow(0)
+    qtbot.mouseClick(dialog.copy_button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(dialog.repeat_button, Qt.MouseButton.LeftButton)
+
+    expected_threshold = "-1" + "0" * 5000
+    assert expected_threshold in dialog.detail_view.toPlainText()
+    assert expected_threshold in QApplication.clipboard().text()
+    assert repeated == [record.result.request]
+
+
 def test_combined_history_shows_title_notation_and_all_component_details(
     qtbot, repository: HistoryRepository
 ) -> None:

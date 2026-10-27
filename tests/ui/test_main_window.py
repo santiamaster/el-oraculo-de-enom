@@ -61,6 +61,28 @@ def test_simple_restore_repeat_and_next_roll_preserve_exact_threshold(
     assert all(record.result.request == request for record in records)
 
 
+def test_simple_result_renders_threshold_beyond_python_decimal_limit(
+    qtbot, repository: HistoryRepository
+) -> None:
+    threshold = 10**5000
+    request = simple_request(1, 6, False, Comparator.GREATER_THAN, threshold)
+    window = MainWindow(repository, roller=lambda request: ((4,),))
+    qtbot.addWidget(window)
+
+    window._execute_request(request)
+
+    assert window.match_summary_label.text() == (
+        "0 de 1 resultados superaron " + "1" + "0" * 5000
+    )
+    assert window.copy_button.isEnabled()
+    window._repeat_last_roll()
+    assert window.threshold_spin.lineEdit().text() == "1" + "0" * 5000
+    assert [record.result.request for record in repository.recent()] == [
+        request,
+        request,
+    ]
+
+
 def combined_request(*, show_sum: bool = True) -> RollRequest:
     return RollRequest(
         (
@@ -118,6 +140,30 @@ def test_combined_builder_executes_saves_and_reads_arbitrary_threshold(
     assert stored.result.components[1].values == (7,)
     assert stored.result.total == 11
     assert not dialog.isVisible()
+
+
+def test_combined_result_renders_threshold_beyond_python_decimal_limit(
+    qtbot, repository: HistoryRepository
+) -> None:
+    threshold = -(10**5000)
+    request = RollRequest(
+        (
+            RollComponentRequest(1, 6, Comparator.GREATER_THAN, threshold),
+            RollComponentRequest(1, 8),
+        ),
+        show_sum=False,
+    )
+    window = MainWindow(repository, roller=lambda request: ((4,), (7,)))
+    qtbot.addWidget(window)
+
+    window._execute_request(request)
+
+    [summary] = window.results_widget.findChildren(
+        QLabel, "componentMatchSummaryLabel"
+    )
+    assert summary.text() == "Filtro > -1" + "0" * 5000 + ": 1 de 1"
+    assert window.repeat_button.isEnabled()
+    assert repository.recent(1)[0].result.request == request
 
 
 def test_custom_quantity_is_explicit_enabled_only_when_selected_and_restored(

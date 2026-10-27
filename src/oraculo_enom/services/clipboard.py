@@ -1,3 +1,4 @@
+from ..domain.integer_text import format_integer
 from ..domain.models import RollResult
 
 
@@ -19,9 +20,12 @@ def format_roll(result: RollResult) -> str:
                 lines.append(f"Suma: {result.total}")
 
         if request.comparator is not None:
+            threshold = request.threshold
+            assert threshold is not None
             die_label = f" d{request.sides}" if result.request.is_combined else ""
             lines.append(
-                f"Filtro{die_label} {request.comparator.value} {request.threshold}: "
+                f"Filtro{die_label} {request.comparator.value} "
+                f"{format_integer(threshold)}: "
                 f"{len(component.matches)} de {len(component.values)}"
             )
 

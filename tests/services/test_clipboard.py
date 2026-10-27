@@ -46,6 +46,19 @@ def test_format_simple_titled_roll_places_title_before_values() -> None:
     )
 
 
+def test_format_roll_copies_threshold_beyond_python_decimal_limit() -> None:
+    threshold = 10**5000
+    request = RollRequest(
+        (RollComponentRequest(1, 6, Comparator.GREATER_THAN, threshold),),
+        show_sum=False,
+    )
+    result = analyze(request, ((4,),), created_at=FIXED_TIME)
+
+    assert format_roll(result) == (
+        "1d6: 4\nFiltro > " + "1" + "0" * 5000 + ": 0 de 1"
+    )
+
+
 def test_format_untitled_roll_starts_with_notation() -> None:
     request = RollRequest((RollComponentRequest(2, 6),), show_sum=False)
     result = analyze(request, ((2, 5),), created_at=FIXED_TIME)

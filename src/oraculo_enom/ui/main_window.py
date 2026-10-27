@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from oraculo_enom.domain.analysis import analyze
 from oraculo_enom.domain.dice import roll_values, validate_request
+from oraculo_enom.domain.integer_text import format_integer
 from oraculo_enom.domain.models import (
     Comparator,
     RollComponentRequest,
@@ -505,9 +506,11 @@ class MainWindow(QMainWindow):
                 result.request.is_combined
                 and component.request.comparator is not None
             ):
+                threshold = component.request.threshold
+                assert threshold is not None
                 filter_label = QLabel(
                     f"Filtro {component.request.comparator.value} "
-                    f"{component.request.threshold}: {len(component.matches)} "
+                    f"{format_integer(threshold)}: {len(component.matches)} "
                     f"de {len(component.values)}"
                 )
                 filter_label.setObjectName("componentMatchSummaryLabel")
@@ -539,9 +542,11 @@ class MainWindow(QMainWindow):
         component = result.components[0]
         comparator = component.request.comparator
         assert comparator is not None
+        threshold = component.request.threshold
+        assert threshold is not None
         return (
             f"{len(component.matches)} de {len(component.values)} resultados "
-            f"{verbs[comparator]} {component.request.threshold}"
+            f"{verbs[comparator]} {format_integer(threshold)}"
         )
 
     def _refresh_recent_history(self) -> None:
